@@ -1,0 +1,16 @@
+# machine-local toolchain & deps
+.toolchain/
+node_modules/
+.claude/
+.DS_Store
+
+# secrets & local state — never commit
+.env
+data/
+
+# generated
+contracts/artifacts/
+contracts/cache/
+deployments.json
+dist/
+*.db

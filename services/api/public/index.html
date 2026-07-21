@@ -1,0 +1,908 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>transF — onchain bank</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --panel: #121219;
+    --panel2: #0e0e15;
+    --row: #17171f;
+    --border: #232330;
+    --border2: #2f2f40;
+    --text: #f2f3f8;
+    --muted: #9a9ab0;
+    --faint: #61617a;
+    --acc: #e13fa3;
+    --acc2: #b06df5;
+    --grad: linear-gradient(90deg, #8a3fd6, #e13fa3);
+    --green: #3fd68f;
+    --amber: #ffb03f;
+    --red: #ff5c7a;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+    color: var(--text);
+    background: var(--bg);
+    min-height: 100vh;
+  }
+  .hidden { display: none !important; }
+
+  label { display: block; font-size: .76rem; font-weight: 600; color: var(--muted); margin: .8rem 0 .3rem; }
+  input {
+    width: 100%; padding: .6rem .75rem; border-radius: 9px; font-size: .9rem;
+    border: 1px solid var(--border2); background: var(--panel2); color: var(--text);
+    transition: border-color .15s, box-shadow .15s;
+  }
+  input:focus { outline: none; border-color: var(--acc); box-shadow: 0 0 0 3px rgba(225,63,163,.16); }
+  button {
+    padding: .6rem 1.1rem; border-radius: 9px; border: 0; cursor: pointer;
+    font-weight: 700; font-size: .88rem; color: #fff; background: var(--grad);
+    transition: filter .15s, transform .1s, opacity .15s;
+  }
+  button:hover { filter: brightness(1.15); }
+  button:active { transform: scale(.98); }
+  button:disabled { opacity: .4; cursor: default; }
+  button.ghost { background: transparent; border: 1px solid var(--border2); color: var(--text); font-weight: 600; }
+  button.wide { width: 100%; margin-top: 1rem; }
+
+  .error {
+    margin-top: .8rem; padding: .55rem .8rem; border-radius: 9px; font-size: .82rem;
+    background: rgba(255,92,122,.08); border: 1px solid rgba(255,92,122,.25); color: var(--red);
+  }
+  .hint { font-size: .76rem; color: var(--faint); margin-top: .55rem; }
+  .row2 { display: flex; gap: .7rem; align-items: end; }
+  .row2 > div { flex: 1; }
+  .row2 button { flex: none; }
+
+  /* ---------- onboarding (split-screen, #BankOnChain style) ---------- */
+  #onboard { display: grid; grid-template-columns: 1fr 1.15fr; min-height: 100vh; }
+  /* narrow screens: stack the form above the hero */
+  @media (max-width: 900px) { #onboard { grid-template-columns: 1fr; } }
+  .onb-left { display: flex; flex-direction: column; padding: 1.6rem 2.2rem; }
+  .onb-logo { display: flex; align-items: center; gap: .5rem; font-weight: 800; font-size: 1rem; }
+  .onb-logo .tri { color: var(--acc); }
+  .onb-form { margin: auto; width: 100%; max-width: 340px; text-align: center; }
+  .onb-form h1 { font-size: 1.5rem; letter-spacing: -.02em; margin-bottom: .35rem; }
+  .onb-form .sub { color: var(--faint); font-size: .82rem; margin-bottom: 1.4rem; }
+  .onb-form label, .onb-form .error { text-align: left; }
+  .btn-primary-lite {
+    width: 100%; margin-top: 1.1rem; padding: .7rem; border-radius: 999px;
+    background: #fff; color: #0a0a0f; font-weight: 700;
+  }
+  .btn-primary-lite:hover { filter: brightness(.92); }
+  .onb-terms { margin-top: 1.4rem; font-size: .68rem; color: var(--faint); }
+  .onb-terms a { color: var(--acc); text-decoration: none; }
+
+  .onb-hero {
+    position: relative; overflow: hidden; display: grid; place-items: center;
+    background:
+      radial-gradient(720px 420px at 70% 32%, rgba(225,63,163,.32), transparent 65%),
+      radial-gradient(560px 360px at 40% 60%, rgba(138,63,214,.22), transparent 60%),
+      #0d0810;
+  }
+  .onb-hero::before {
+    content: ""; position: absolute; inset: 0; opacity: .5;
+    background:
+      repeating-linear-gradient(90deg, rgba(255,255,255,.045) 0 1px, transparent 1px 90px),
+      repeating-linear-gradient(0deg, rgba(255,255,255,.045) 0 1px, transparent 1px 90px);
+  }
+  .onb-hero-inner { position: relative; text-align: center; padding: 2rem; max-width: 560px; }
+  .onb-hero h2 { font-size: 2.5rem; font-weight: 800; letter-spacing: -.02em; }
+  .onb-hero .tag { color: var(--muted); margin: .4rem 0 1.8rem; font-size: .95rem; }
+  .onb-mock {
+    text-align: left; background: var(--panel); border: 1px solid var(--border2); border-radius: 14px;
+    padding: 1.1rem; box-shadow: 0 24px 80px rgba(0,0,0,.55), 0 0 60px rgba(225,63,163,.12);
+  }
+
+  /* provisioning stage screen */
+  #provisioning { display: none; min-height: 100vh; place-items: center; padding: 1.5rem; }
+  .prov-card { width: 100%; max-width: 420px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.6rem; }
+  .prov-card h1 { font-size: 1.2rem; margin-bottom: .3rem; }
+  .prov-card .sub { color: var(--faint); font-size: .82rem; margin-bottom: 1.3rem; }
+  .pstep { display: flex; align-items: center; gap: .8rem; padding: .55rem 0; color: var(--faint); font-size: .9rem; font-weight: 600; }
+  .pstep .pdot {
+    width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; flex: none;
+    border: 2px solid var(--border2); font-size: .72rem; color: transparent; transition: all .3s;
+  }
+  .pstep.active { color: var(--text); }
+  .pstep.active .pdot { border-color: var(--acc2); animation: pulse 1.2s infinite; }
+  .pstep.done { color: var(--muted); }
+  .pstep.done .pdot { border-color: var(--green); background: rgba(63,214,143,.12); color: var(--green); }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: 1.3rem; text-align: left;
+  }
+  .corridor { display: flex; align-items: center; justify-content: center; gap: .8rem; font-size: .8rem; color: var(--muted); margin-bottom: 1.2rem; }
+  .corridor .flag { font-size: 1.35rem; display: block; text-align: center; }
+  .corridor .arrow { color: var(--faint); }
+
+  /* ---------- app shell ---------- */
+  #dashboard { display: none; grid-template-columns: 205px 1fr 370px; min-height: 100vh; }
+
+  .side {
+    background: var(--panel2); border-right: 1px solid var(--border);
+    padding: 1.1rem .9rem; display: flex; flex-direction: column; gap: .3rem;
+    position: sticky; top: 0; height: 100vh;
+  }
+  .side .logo { display: flex; align-items: center; gap: .5rem; font-weight: 800; font-size: 1.05rem; letter-spacing: -.01em; padding: .3rem .5rem .9rem; }
+  .side .logo .tri { color: var(--acc); font-size: 1.1rem; }
+  .userpill {
+    display: none; align-items: center; gap: .55rem; padding: .5rem .6rem; margin-bottom: .8rem;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px; font-size: .82rem; font-weight: 600;
+  }
+  .userpill .avatar {
+    width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; flex: none;
+    background: var(--grad); font-weight: 700; font-size: .75rem; color: #fff;
+  }
+  .nav { display: grid; gap: .15rem; }
+  .nav a {
+    display: flex; align-items: center; gap: .6rem; padding: .5rem .6rem; border-radius: 9px;
+    color: var(--muted); text-decoration: none; font-size: .85rem; font-weight: 600;
+  }
+  .nav a.active { color: var(--text); background: var(--row); }
+  .nav a:hover { color: var(--text); }
+  .side .foot { margin-top: auto; color: var(--faint); font-size: .75rem; padding: .5rem .6rem; }
+
+  .main { padding: 1.2rem 1.4rem; min-width: 0; }
+  .topbar { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.2rem; }
+  .topbar h1 { font-size: 1.05rem; color: var(--acc); font-weight: 800; letter-spacing: .01em; }
+  .search {
+    flex: 1; max-width: 420px; margin: 0 auto; display: flex; align-items: center; gap: .5rem;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 999px;
+    padding: .45rem .95rem; color: var(--faint); font-size: .82rem;
+  }
+  .net-chip { font-size: .75rem; color: var(--muted); border: 1px solid var(--border); border-radius: 999px; padding: .35rem .8rem; background: var(--panel); }
+
+  .rail { padding: 1.2rem 1.3rem 2rem 0; }
+
+  /* responsive — must come after the base .side/.main/.rail rules */
+  @media (max-width: 1180px) {
+    #dashboard { grid-template-columns: 205px 1fr; }
+    .rail { grid-column: 2; padding: 0 1.4rem 2rem 1.4rem; }
+  }
+  @media (max-width: 860px) {
+    #dashboard { grid-template-columns: 1fr; }
+    .side { display: none; }
+    .rail, .main { grid-column: 1; }
+    .rail { padding: 0 1.4rem 2rem; }
+  }
+
+  /* ---------- cards ---------- */
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.2rem; margin-bottom: 1.1rem; }
+  .card h2 { font-size: .72rem; text-transform: uppercase; letter-spacing: .1em; color: var(--faint); font-weight: 700; margin-bottom: .9rem; }
+
+  /* account card */
+  .acct { position: relative; overflow: hidden; }
+  .acct .acct-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
+  .acct .label { font-size: .76rem; color: var(--muted); font-weight: 600; }
+  .amount { font-size: 2.3rem; font-weight: 800; letter-spacing: -.03em; margin: .25rem 0 .2rem; }
+  .amount .cur { font-size: 1.15rem; color: var(--muted); font-weight: 600; margin-right: .15rem; }
+  .chip { padding: .16rem .6rem; border-radius: 999px; font-size: .68rem; font-weight: 700; letter-spacing: .04em; }
+  .chip.eur { background: rgba(225,63,163,.13); color: #ff8ecd; border: 1px solid rgba(225,63,163,.4); }
+  .chip.ok { background: rgba(63,214,143,.1); color: var(--green); border: 1px solid rgba(63,214,143,.35); }
+  .chip.pend { background: rgba(255,176,63,.1); color: var(--amber); border: 1px solid rgba(255,176,63,.3); }
+  .chip.err { background: rgba(255,92,122,.1); color: var(--red); border: 1px solid rgba(255,92,122,.3); }
+  .spark { flex: none; }
+  .detail { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .5rem 0; border-top: 1px solid var(--border); margin-top: .1rem; }
+  .detail .k { font-size: .7rem; color: var(--faint); font-weight: 700; letter-spacing: .05em; white-space: nowrap; }
+  .detail .v { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .76rem; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .copybtn { background: var(--row); border: 1px solid var(--border2); color: var(--muted); font-size: .66rem; font-weight: 600; padding: .2rem .5rem; border-radius: 6px; flex: none; }
+  .copybtn:hover { color: var(--text); filter: none; }
+
+  /* history — transaction list styling */
+  .hitem { display: flex; align-items: center; gap: .7rem; padding: .6rem .6rem; border-radius: 10px; font-size: .84rem; background: var(--row); margin-bottom: .45rem; border: 1px solid transparent; }
+  .hitem .hic { width: 32px; height: 32px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--panel2); border: 1px solid var(--border2); font-size: .9rem; }
+  .hitem .hmain { flex: 1; min-width: 0; }
+  .hitem .hn { font-weight: 700; font-size: .84rem; }
+  .hitem .hs { font-size: .7rem; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hitem .hamt { text-align: right; font-weight: 700; color: #ff8ecd; }
+  .hitem .hst { font-size: .64rem; font-weight: 700; text-align: right; }
+  .empty { color: var(--faint); font-size: .84rem; text-align: center; padding: .8rem 0; }
+
+  /* ---------- send rail ---------- */
+  .tabs { display: flex; gap: .35rem; background: var(--panel2); border: 1px solid var(--border); border-radius: 999px; padding: .25rem; margin-bottom: 1rem; }
+  .tab { flex: 1; background: transparent; border: 0; color: var(--muted); font-weight: 600; font-size: .78rem; padding: .45rem .3rem; border-radius: 999px; }
+  .tab:hover { filter: none; color: var(--text); }
+  .tab.active { background: var(--acc); color: #fff; font-weight: 700; }
+
+  .bigamount { display: flex; align-items: center; gap: .45rem; background: var(--panel2); border: 1px solid var(--border2); border-radius: 11px; padding: .35rem .85rem; }
+  .bigamount span { font-size: 1.25rem; font-weight: 700; color: var(--muted); }
+  .bigamount input { border: 0; background: transparent; font-size: 1.7rem; font-weight: 800; padding: .25rem 0; letter-spacing: -.02em; }
+  .bigamount input:focus { box-shadow: none; }
+  .corridor.small { justify-content: flex-start; margin: .8rem 0 0; }
+  .corridor.small .flag { font-size: 1.05rem; }
+
+  .quote { margin-top: 1rem; border-top: 1px dashed var(--border2); padding-top: .8rem; animation: rise .3s ease; }
+  .qrow { display: flex; justify-content: space-between; font-size: .84rem; padding: .25rem 0; color: var(--muted); }
+  .qrow .dotfill { flex: 1; border-bottom: 1px dotted var(--border2); margin: 0 .55rem .3rem; }
+  .qrow.total { color: var(--text); font-weight: 700; font-size: .95rem; margin-top: .25rem; }
+  .qrow.total .val { color: var(--green); font-size: 1.15rem; }
+  .rate-badge { display: inline-block; font-size: .68rem; color: #ff8ecd; background: rgba(225,63,163,.1); border: 1px solid rgba(225,63,163,.3); border-radius: 999px; padding: .08rem .5rem; margin-left: .35rem; }
+
+  /* timeline */
+  .timeline { margin-top: .3rem; }
+  .tstep { display: flex; gap: .8rem; opacity: 0; transform: translateY(6px); transition: opacity .4s, transform .4s; }
+  .tstep.show { opacity: 1; transform: none; }
+  .tstep .rail2 { display: flex; flex-direction: column; align-items: center; }
+  .tstep .node {
+    width: 25px; height: 25px; border-radius: 50%; display: grid; place-items: center; flex: none;
+    background: var(--panel2); border: 2px solid var(--border2); font-size: .68rem; transition: border-color .3s, background .3s;
+  }
+  .tstep.done .node { border-color: var(--green); background: rgba(63,214,143,.1); }
+  .tstep.active .node { border-color: var(--acc2); animation: pulse 1.2s infinite; }
+  .tstep .line { width: 2px; flex: 1; min-height: 16px; background: var(--border2); margin: 3px 0; }
+  .tstep:last-child .line { display: none; }
+  .tstep .body { padding-bottom: .9rem; min-width: 0; }
+  .tstep .t { font-size: .84rem; font-weight: 600; }
+  .tstep .d { font-size: .7rem; color: var(--faint); font-family: ui-monospace, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300px; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(176,109,245,.35); } 50% { box-shadow: 0 0 0 7px rgba(176,109,245,0); } }
+  @keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  /* result boxes */
+  .pickup {
+    margin-top: 1rem; text-align: center; border: 1.5px dashed rgba(255,176,63,.45); border-radius: 13px;
+    padding: 1.1rem 1rem; background: rgba(255,176,63,.05); animation: rise .4s ease;
+  }
+  .pickup .plabel { font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; color: var(--amber); font-weight: 700; }
+  .pickup .code { font-size: 2rem; font-weight: 800; letter-spacing: .26em; color: var(--amber); margin: .3rem 0 .15rem; text-shadow: 0 0 22px rgba(255,176,63,.35); }
+  .pickup .pnote { font-size: .78rem; color: var(--muted); }
+  .paidbox { margin-top: 1rem; text-align: center; padding: 1.1rem; border-radius: 13px; background: rgba(63,214,143,.06); border: 1px solid rgba(63,214,143,.3); animation: rise .4s ease; }
+  .paidbox .check { width: 48px; height: 48px; margin: 0 auto .45rem; border-radius: 50%; background: rgba(63,214,143,.14); display: grid; place-items: center; }
+  .paidbox .check svg { stroke: var(--green); stroke-width: 3; fill: none; stroke-linecap: round; stroke-linejoin: round; }
+  .paidbox .check svg path { stroke-dasharray: 30; stroke-dashoffset: 30; animation: draw .6s .2s ease forwards; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .paidbox .pt { font-weight: 800; font-size: 1rem; color: var(--green); }
+  .paidbox .pd { font-size: .78rem; color: var(--muted); }
+</style>
+</head>
+<body>
+  <!-- ============ onboarding (split-screen) ============ -->
+  <section id="onboard">
+    <div class="onb-left">
+      <div class="onb-logo"><span class="tri">▽</span> transF</div>
+      <div class="onb-form">
+        <h1>Open your Account</h1>
+        <div class="sub">A EUR account with a real IBAN, held in your own smart-account vault.</div>
+        <label>Your name</label>
+        <input id="name" placeholder="Amina Kamau" />
+        <label>Country of residence</label>
+        <input id="country" value="DE" />
+        <button class="btn-primary-lite" id="btn-create">Open my account</button>
+        <div class="error hidden" id="create-err"></div>
+        <div class="onb-terms">By signing up to create an account you accept the<br/><a href="#">Terms of use</a> &amp; <a href="#">Privacy policy</a></div>
+      </div>
+    </div>
+    <div class="onb-hero">
+      <div class="onb-hero-inner">
+        <h2>#BankOnChain</h2>
+        <div class="tag">Welcome to the future of banking.</div>
+        <div class="onb-mock">
+          <div class="label" style="font-size:.72rem;color:var(--muted);font-weight:600">Primary account <span class="chip eur">EUR</span></div>
+          <div class="amount" style="font-size:1.9rem"><span class="cur">€</span>40,206.20</div>
+          <svg width="100%" height="54" viewBox="0 0 420 54" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <linearGradient id="sg2" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#8a3fd6"/><stop offset="1" stop-color="#e13fa3"/>
+              </linearGradient>
+            </defs>
+            <path d="M0 44 L26 40 L52 42 L78 34 L104 38 L130 28 L156 32 L182 24 L208 27 L234 18 L260 22 L286 13 L312 17 L338 9 L364 13 L392 5 L420 9"
+                  fill="none" stroke="url(#sg2)" stroke-width="2.2" stroke-linejoin="round"/>
+          </svg>
+          <div style="display:flex;gap:1rem;font-size:.74rem;color:var(--muted)">
+            <span>IBAN · SEPA in</span><span>🇰🇪 cash out</span><span>🏦 bank out</span><span>🇮🇳 UPI</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ provisioning flow ============ -->
+  <section id="provisioning">
+    <div class="prov-card">
+      <h1>Setting up your account</h1>
+      <div class="sub">This happens once — your vault and IBAN are being created for real.</div>
+      <div id="prov-steps">
+        <div class="pstep" ><span class="pdot">✓</span> Creating your account</div>
+        <div class="pstep"><span class="pdot">✓</span> Deploying your smart wallet <span style="font-weight:400;color:var(--faint)">(gasless)</span></div>
+        <div class="pstep"><span class="pdot">✓</span> Linking your wallet to Monerium</div>
+        <div class="pstep"><span class="pdot">✓</span> Issuing your IBAN</div>
+      </div>
+      <div class="error hidden" id="prov-err"></div>
+      <button class="ghost wide hidden" id="btn-skip">Continue to dashboard anyway</button>
+    </div>
+  </section>
+
+  <!-- ============ app shell ============ -->
+  <section id="dashboard">
+    <aside class="side">
+      <div class="logo"><span class="tri">▽</span> transF</div>
+      <div class="userpill" id="userpill"><span class="avatar" id="avatar">?</span><span id="pillname"></span></div>
+      <nav class="nav">
+        <a class="active" href="#">▦ Dashboard</a>
+        <a href="#">⇅ Transactions</a>
+        <a href="#">▤ Accounts</a>
+        <a href="#">◔ Contacts</a>
+        <a href="#">⚙ Settings</a>
+      </nav>
+      <div class="foot">? Need help</div>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <h1>Dashboard</h1>
+        <div class="search">⌕ Search…</div>
+        <div class="net-chip">local demo</div>
+      </div>
+
+      <div class="card acct">
+        <div class="acct-top">
+          <div>
+            <div class="label">Primary account <span class="chip eur">EUR</span> <span class="chip ok" id="fund-chip">ACTIVE</span></div>
+            <div class="amount" id="balance"><span class="cur">€</span>0.00</div>
+          </div>
+          <svg class="spark" width="220" height="64" viewBox="0 0 220 64" aria-hidden="true">
+            <defs>
+              <linearGradient id="sg" x1="0" y1="0" x2="1" y2="0">
+                <stop offset="0" stop-color="#8a3fd6"/><stop offset="1" stop-color="#e13fa3"/>
+              </linearGradient>
+              <linearGradient id="sf" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="rgba(225,63,163,.22)"/><stop offset="1" stop-color="rgba(225,63,163,0)"/>
+              </linearGradient>
+            </defs>
+            <path d="M0 50 L14 46 L28 48 L42 40 L56 44 L70 34 L84 38 L98 30 L112 33 L126 24 L140 28 L154 18 L168 23 L182 14 L196 18 L210 8 L220 12"
+                  fill="none" stroke="url(#sg)" stroke-width="2.2" stroke-linejoin="round"/>
+            <path d="M0 50 L14 46 L28 48 L42 40 L56 44 L70 34 L84 38 L98 30 L112 33 L126 24 L140 28 L154 18 L168 23 L182 14 L196 18 L210 8 L220 12 L220 64 L0 64 Z"
+                  fill="url(#sf)"/>
+          </svg>
+        </div>
+        <div class="detail">
+          <span class="k">IBAN</span>
+          <span class="v" id="iban">—</span>
+          <button class="copybtn" data-copy="iban">copy</button>
+        </div>
+        <div class="detail">
+          <span class="k">SMART ACCOUNT</span>
+          <span class="v" id="address">—</span>
+          <button class="copybtn" data-copy="address">copy</button>
+        </div>
+      </div>
+
+      <div class="card" id="fund-card">
+        <h2>Add money</h2>
+        <div class="row2">
+          <div>
+            <label style="margin-top:0">SEPA transfer amount (€)</label>
+            <input id="dep-amount" value="250" inputmode="decimal" />
+          </div>
+          <button id="btn-deposit">Deposit</button>
+        </div>
+        <div class="hint">Simulates a SEPA transfer to your IBAN — Monerium mints EURe straight into the vault.</div>
+        <div class="error hidden" id="dep-err"></div>
+      </div>
+
+      <div class="card">
+        <h2>Transaction history</h2>
+        <div id="history"><div class="empty">No transfers yet</div></div>
+      </div>
+    </main>
+
+    <div class="rail">
+      <div class="card" id="send-card">
+        <h2>Send money</h2>
+        <div id="step-quote">
+          <div class="tabs">
+            <button class="tab active" data-rail="cash" id="tab-cash">🇰🇪 Cash</button>
+            <button class="tab" data-rail="sepa" id="tab-sepa">🏦 Bank</button>
+            <button class="tab" data-rail="upi" id="tab-upi">🇮🇳 UPI</button>
+          </div>
+          <div id="upi-scan" class="hidden">
+            <label style="margin-top:0">UPI QR / merchant VPA</label>
+            <div class="row2">
+              <div><input id="upi-qr" placeholder="paste upi://pay?pa=… or merchant@okicici" /></div>
+              <button class="ghost" id="btn-scan">📷 Scan</button>
+            </div>
+            <div class="hint hidden" id="upi-parsed"></div>
+            <video id="qr-video" class="hidden" muted playsinline style="width:100%;border-radius:12px;margin-top:.6rem"></video>
+          </div>
+          <label style="margin-top:0" id="amount-label">You send</label>
+          <div class="bigamount"><span id="amount-cur">€</span><input id="send-amount" value="100" inputmode="decimal" /></div>
+          <div class="corridor small">
+            <span><span class="flag">🇪🇺</span></span><span class="arrow">─▶</span>
+            <span><span class="flag" id="corridor-flag">🇰🇪</span></span>
+            <span style="font-size:.78rem" id="corridor-desc">Recipient collects <b>KES cash</b> at any MoneyGram agent</span>
+          </div>
+          <button class="wide" id="btn-quote">Get quote</button>
+
+          <div class="quote hidden" id="quote-box">
+            <div class="qrow" id="row-mid"><span>Mid-market rate</span><span class="dotfill"></span><span id="q-mid"></span></div>
+            <div class="qrow" id="row-rate"><span>Your rate <span class="rate-badge">0.50% spread</span></span><span class="dotfill"></span><span id="q-rate"></span></div>
+            <div class="qrow"><span>Fixed fee</span><span class="dotfill"></span><span id="q-fee"></span></div>
+            <div class="qrow total"><span id="total-label">Recipient gets</span><span class="val" id="q-recv"></span></div>
+            <div class="row2" style="margin-top:.9rem" id="recipient-row">
+              <div><label style="margin-top:0">Recipient name</label><input id="rec-name" placeholder="Joseph Otieno" /></div>
+              <div id="field-phone"><label style="margin-top:0">Phone</label><input id="rec-phone" placeholder="+254 7xx…" /></div>
+              <div id="field-iban" class="hidden"><label style="margin-top:0">Recipient IBAN</label><input id="rec-iban" placeholder="DE89 3704 0044 0532 0130 00" /></div>
+            </div>
+            <button class="wide" id="btn-send">Send now</button>
+          </div>
+          <div class="error hidden" id="send-err"></div>
+        </div>
+
+        <div id="step-progress" class="hidden">
+          <div class="timeline" id="timeline"></div>
+          <div class="pickup hidden" id="pickup-box">
+            <div class="plabel">MoneyGram pickup reference</div>
+            <div class="code" id="t-ref"></div>
+            <div class="pnote"><span id="p-name"></span> shows this code + ID at any agent · gets <b id="p-kes"></b></div>
+            <button class="ghost" style="margin-top:.9rem" id="btn-pickup">Simulate cash pickup</button>
+          </div>
+          <div class="pickup hidden" id="sepa-box" style="border-color:rgba(176,109,245,.45);background:rgba(176,109,245,.06)">
+            <div class="plabel" style="color:var(--acc2)">SEPA bank payout</div>
+            <div class="code" id="sepa-status" style="font-size:1.15rem;letter-spacing:.04em;color:var(--acc2);text-shadow:none"></div>
+            <div class="pnote" id="sepa-note"></div>
+          </div>
+          <div class="pickup hidden" id="upi-box" style="border-color:rgba(63,214,143,.45);background:rgba(63,214,143,.05)">
+            <div class="plabel" style="color:var(--green)">UPI payment successful</div>
+            <div class="code" id="upi-utr" style="font-size:1.25rem;letter-spacing:.1em;color:var(--green);text-shadow:none"></div>
+            <div class="pnote" id="upi-note"></div>
+          </div>
+          <div class="paidbox hidden" id="paid-box">
+            <div class="check"><svg width="24" height="24" viewBox="0 0 24 24"><path d="M4 12.5l5 5L20 6.5"/></svg></div>
+            <div class="pt">Cash collected</div>
+            <div class="pd" id="paid-note"></div>
+          </div>
+          <button class="ghost wide hidden" id="btn-again">Send another transfer</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let user = null, quote = null, transfer = null, poll = null;
+
+const fmt = (n, dp = 2) => Number(n).toLocaleString("en", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+
+async function api(path, body) {
+  const res = await fetch(path, body
+    ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
+    : undefined);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || res.statusText);
+  return data;
+}
+const showErr = (id, e) => { const el = $(id); el.textContent = e.message; el.classList.remove("hidden"); };
+const clearErr = (id) => $(id).classList.add("hidden");
+
+/* ---------- account ---------- */
+function renderUser(u) {
+  user = u;
+  $("balance").innerHTML = `<span class="cur">€</span>${fmt(u.balanceEur ?? 0)}`;
+  $("address").textContent = u.address;
+  const chip = $("fund-chip");
+  if (u.iban) {
+    $("iban").textContent = u.iban;
+    chip.textContent = "ACTIVE"; chip.className = "chip ok";
+  } else if ((u.funding || {}).status === "error") {
+    $("iban").textContent = (u.funding.detail || "provisioning failed").slice(0, 60);
+    chip.textContent = "ERROR"; chip.className = "chip err";
+  } else {
+    $("iban").textContent = `${(u.funding || {}).detail || "provisioning via Monerium sandbox"}…`;
+    chip.textContent = "PENDING"; chip.className = "chip pend";
+  }
+}
+
+async function refresh() {
+  if (!user) return;
+  try { renderUser(await api(`/api/users/${user.id}`)); } catch {}
+}
+
+/* ---------- onboarding flow: create -> staged provisioning -> dashboard */
+function provStep(i, state) {
+  const el = document.querySelectorAll("#prov-steps .pstep")[i];
+  if (el) el.className = "pstep" + (state ? " " + state : "");
+}
+
+function enterDashboard(name) {
+  $("onboard").style.display = "none";
+  $("provisioning").style.display = "none";
+  $("dashboard").style.display = "grid";
+  $("userpill").style.display = "flex";
+  $("pillname").textContent = name;
+  $("avatar").textContent = name.trim()[0].toUpperCase();
+  poll = setInterval(refresh, 5000);
+  refresh();
+}
+
+function enterProvisioning(name) {
+  $("onboard").style.display = "none";
+  $("provisioning").style.display = "grid";
+  provStep(0, "done");
+  provStep(1, "active");
+  $("btn-skip").onclick = () => enterDashboard(name);
+
+  const tick = async () => {
+    let u = user;
+    try { u = await api(`/api/users/${user.id}`); user = u; } catch {}
+    const f = u.funding || {};
+    const detail = (f.detail || "").toLowerCase();
+
+    if (u.iban || f.status === "active" || f.mode === "mock") {
+      provStep(1, "done"); provStep(2, "done"); provStep(3, "done");
+      setTimeout(() => enterDashboard(name), 900);
+      return;
+    }
+    if (f.status === "error") {
+      const err = $("prov-err");
+      err.textContent = f.detail || "provisioning failed";
+      err.classList.remove("hidden");
+      $("btn-skip").classList.remove("hidden");
+      return;
+    }
+    if (detail.includes("deploy")) {
+      provStep(1, "active");
+    } else if (detail.includes("link") || f.status === "iban_pending") {
+      provStep(1, "done"); provStep(2, f.status === "iban_pending" ? "done" : "active");
+      if (f.status === "iban_pending") provStep(3, "active");
+    }
+    setTimeout(tick, 2500);
+  };
+  tick();
+}
+
+$("btn-create").onclick = async () => {
+  clearErr("create-err");
+  const name = $("name").value.trim() || "Demo User";
+  try {
+    const u = await api("/api/users", { name, country: $("country").value.trim() || "DE" });
+    u.balanceEur = 0;
+    user = u;
+    renderUser(u);
+    enterProvisioning(name);
+  } catch (e) { showErr("create-err", e); }
+};
+
+$("btn-deposit").onclick = async () => {
+  clearErr("dep-err");
+  try {
+    await api("/api/simulate/sepa-deposit", { iban: user.iban, amountEur: Number($("dep-amount").value) });
+    await refresh();
+  } catch (e) { showErr("dep-err", e); }
+};
+
+document.querySelectorAll(".copybtn").forEach((b) => {
+  b.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText($(b.dataset.copy).textContent);
+      b.textContent = "copied!"; setTimeout(() => (b.textContent = "copy"), 1200);
+    } catch {}
+  };
+});
+
+/* ---------- payout rail tabs ---------- */
+let rail = "cash";
+const CORRIDORS = {
+  cash: ["🇰🇪", "Recipient collects <b>KES cash</b> at any MoneyGram agent"],
+  sepa: ["🏦", "Recipient gets a <b>SEPA transfer</b> — EURe redeemed via Monerium"],
+  upi: ["🇮🇳", "Merchant gets an <b>instant UPI credit</b> in INR — settled in USDC"],
+};
+for (const tab of document.querySelectorAll(".tab")) {
+  tab.onclick = () => {
+    rail = tab.dataset.rail;
+    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
+    $("field-phone").classList.toggle("hidden", rail !== "cash");
+    $("field-iban").classList.toggle("hidden", rail !== "sepa");
+    $("recipient-row").classList.toggle("hidden", rail === "upi");
+    $("upi-scan").classList.toggle("hidden", rail !== "upi");
+    $("amount-label").textContent = rail === "upi" ? "Amount on the bill" : "You send";
+    $("amount-cur").textContent = rail === "upi" ? "₹" : "€";
+    $("corridor-flag").textContent = CORRIDORS[rail][0];
+    $("corridor-desc").innerHTML = CORRIDORS[rail][1];
+    $("quote-box").classList.add("hidden");
+  };
+}
+
+/* ---------- UPI QR parsing + camera scan ---------- */
+let upiTarget = { vpa: "", name: "" };
+function parseUpiQr(text) {
+  text = text.trim();
+  if (/^upi:\/\//i.test(text)) {
+    try {
+      const q = new URL(text.replace(/^upi:\/\//i, "http://upi/")).searchParams;
+      return { vpa: (q.get("pa") || "").trim(), name: (q.get("pn") || "").trim(), amount: q.get("am") || "" };
+    } catch { return { vpa: "", name: "", amount: "" }; }
+  }
+  return { vpa: text, name: "", amount: "" };
+}
+$("upi-qr").addEventListener("input", () => {
+  const p = parseUpiQr($("upi-qr").value);
+  upiTarget = { vpa: p.vpa, name: p.name };
+  const hint = $("upi-parsed");
+  if (p.vpa) {
+    hint.textContent = `→ pay ${p.name || p.vpa}${p.name ? ` (${p.vpa})` : ""}`;
+    hint.classList.remove("hidden");
+    if (p.amount) $("send-amount").value = p.amount;
+  } else {
+    hint.classList.add("hidden");
+  }
+  $("quote-box").classList.add("hidden");
+});
+$("btn-scan").onclick = async () => {
+  clearErr("send-err");
+  if (!("BarcodeDetector" in window) || !navigator.mediaDevices?.getUserMedia) {
+    return showErr("send-err", new Error("camera scanning not supported in this browser — paste the QR link instead"));
+  }
+  try {
+    const video = $("qr-video");
+    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+    video.srcObject = stream;
+    video.classList.remove("hidden");
+    await video.play();
+    const detector = new BarcodeDetector({ formats: ["qr_code"] });
+    const timer = setInterval(async () => {
+      try {
+        const codes = await detector.detect(video);
+        if (codes.length) {
+          clearInterval(timer);
+          stream.getTracks().forEach((t) => t.stop());
+          video.classList.add("hidden");
+          $("upi-qr").value = codes[0].rawValue;
+          $("upi-qr").dispatchEvent(new Event("input"));
+        }
+      } catch {}
+    }, 300);
+  } catch (e) { showErr("send-err", e); }
+};
+
+/* ---------- quote ---------- */
+$("send-amount").addEventListener("input", () => {
+  $("quote-box").classList.add("hidden");
+});
+
+$("btn-quote").onclick = async () => {
+  clearErr("send-err");
+  try {
+    const amount = Number($("send-amount").value);
+    quote = await api("/api/quotes", rail === "upi"
+      ? { userId: user.id, rail, receiveInr: amount }
+      : { userId: user.id, rail, sendEur: amount });
+    const r = quote.rail;
+    $("row-mid").classList.toggle("hidden", r === "sepa");
+    $("row-rate").classList.toggle("hidden", r === "sepa");
+    if (r !== "sepa") {
+      const unit = r === "upi" ? "INR" : "KES";
+      $("q-mid").textContent = `1 EUR = ${fmt(quote.midRate, 2)} ${unit}`;
+      $("q-rate").textContent = `1 EUR = ${fmt(quote.fxRate, 2)} ${unit}`;
+    }
+    $("q-fee").textContent = `€${fmt(quote.fixedFeeEur)}`;
+    if (r === "upi") {
+      $("total-label").textContent = "You pay";
+      $("q-recv").textContent = `€${fmt(quote.sendEur)}`;
+      $("btn-send").textContent = `Pay ₹${fmt(quote.receiveInr)} (€${fmt(quote.sendEur)})`;
+    } else {
+      $("total-label").textContent = "Recipient gets";
+      $("q-recv").textContent = r === "sepa" ? `€${fmt(quote.receiveEur)}` : `KES ${fmt(quote.receiveKes)}`;
+      $("btn-send").textContent = `Send €${fmt(quote.sendEur)} now`;
+    }
+    $("quote-box").classList.remove("hidden");
+  } catch (e) { showErr("send-err", e); }
+};
+
+/* ---------- transfer + animated timeline ---------- */
+const STEP_LABELS = {
+  "vault.debit": ["Debiting your EUR vault", "💶"],
+  "eure.approve(swapper)": ["Authorizing FX swap", "🔏"],
+  "swapper.swapExactIn": ["Swapping EURe → USDC", "🔁"],
+  "usdc.approve(bridge)": ["Authorizing bridge escrow", "🔏"],
+  "bridge.lockForPayout": ["Locking USDC for Stellar payout", "🌉"],
+  "bridge.settle": ["Escrow settled on-chain", "✅"],
+};
+
+/** Synthetic (off-chain) steps appended after the tx steps per rail. */
+function sepaSteps(t) {
+  const s = t.sepa || {};
+  if (s.mode === "sandbox") {
+    return [["Monerium redeem order placed", `order ${s.orderId || "…"} · ${s.state}`, "🔥"]];
+  }
+  return [["SEPA payout (simulated)", s.detail || "", "🏦"]];
+}
+function upiSteps(t) {
+  const u = t.upi || {};
+  return [["UPI credit to merchant", `UTR ${u.utr || "…"} · ${u.state || ""}`, "🇮🇳"]];
+}
+
+function stepEl(title, detail, icon) {
+  const el = document.createElement("div");
+  el.className = "tstep";
+  el.innerHTML = `
+    <div class="rail2"><div class="node">${icon}</div><div class="line"></div></div>
+    <div class="body"><div class="t">${title}</div><div class="d">${detail}</div></div>`;
+  return el;
+}
+
+/** Replay executed steps with stagger so the pipeline is legible. */
+function playTimeline(t, { onDone } = {}) {
+  const tl = $("timeline");
+  tl.innerHTML = "";
+  const steps = t.txs.map((x) => {
+    const [label, icon] = STEP_LABELS[x.step] || [x.step, "⚙️"];
+    return stepEl(label, `tx ${x.hash}`, icon);
+  });
+  if (t.rail === "sepa") {
+    for (const [label, detail, icon] of sepaSteps(t)) steps.push(stepEl(label, detail, icon));
+  }
+  if (t.rail === "upi") {
+    for (const [label, detail, icon] of upiSteps(t)) steps.push(stepEl(label, detail, icon));
+  }
+  steps.forEach((el) => tl.appendChild(el));
+  steps.forEach((el, i) => {
+    setTimeout(() => {
+      el.classList.add("show", "active");
+      if (i > 0) { steps[i - 1].classList.remove("active"); steps[i - 1].classList.add("done"); }
+      if (i === steps.length - 1) {
+        setTimeout(() => {
+          el.classList.remove("active"); el.classList.add("done");
+          if (onDone) onDone();
+        }, 450);
+      }
+    }, 380 * (i + 1));
+  });
+}
+
+function revealPickup(t) {
+  $("pickup-box").classList.remove("hidden");
+  $("t-ref").textContent = t.pickup.referenceCode;
+  $("p-name").textContent = t.recipientName;
+  $("p-kes").textContent = `KES ${fmt(t.receiveKes)}`;
+  if (t.pickup.interactiveUrl) {
+    $("p-kes").insertAdjacentHTML("afterend",
+      ` · <a href="${t.pickup.interactiveUrl}" target="_blank" rel="noreferrer" style="color:var(--amber)">anchor page ↗</a>`);
+  }
+  $("pickup-box").scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function renderSepaResult(t) {
+  const s = t.sepa || {};
+  $("sepa-box").classList.remove("hidden");
+  if (t.state === "PAID") {
+    $("sepa-status").textContent = s.mode === "sandbox" ? "SEPA payout processed" : "SEPA payout simulated";
+    $("sepa-note").textContent =
+      `${t.recipientName} receives €${fmt(t.receiveEur)} → ${t.recipientIban}` +
+      (s.detail ? ` · ${s.detail}` : "");
+    $("btn-again").classList.remove("hidden");
+  } else if (t.state === "FAILED") {
+    $("sepa-status").textContent = "Payout failed";
+    $("sepa-note").textContent = t.error || "unknown error";
+    $("btn-again").classList.remove("hidden");
+  } else {
+    $("sepa-status").textContent = "Awaiting SEPA settlement…";
+    $("sepa-note").textContent = `Monerium order ${s.orderId || ""} · ${s.state || "in flight"}`;
+  }
+}
+
+async function pollSepaTransfer(id) {
+  let t;
+  try { t = await api(`/api/transfers/${id}`); } catch { t = null; }
+  if (t) {
+    transfer = t;
+    renderSepaResult(t);
+    updateHistory(t);
+    if (t.state !== "PAYOUT_SUBMITTED") { refresh(); return; }
+  }
+  setTimeout(() => pollSepaTransfer(id), 5000);
+}
+
+$("btn-send").onclick = async () => {
+  clearErr("send-err");
+  $("btn-send").disabled = true;
+  try {
+    const t = await api("/api/transfers", {
+      quoteId: quote.id,
+      recipientName: rail === "upi"
+        ? (upiTarget.name || upiTarget.vpa)
+        : ($("rec-name").value.trim() || "Recipient"),
+      recipientPhone: $("rec-phone").value.trim() || "+254700000000",
+      recipientIban: $("rec-iban").value.trim(),
+      recipientVpa: upiTarget.vpa,
+    });
+    transfer = t;
+    if (t.state === "FAILED") throw new Error(t.error || "transfer failed");
+    $("step-quote").classList.add("hidden");
+    $("step-progress").classList.remove("hidden");
+    if (t.rail === "sepa") {
+      playTimeline(t, { onDone: () => {
+        renderSepaResult(t);
+        if (t.state === "PAYOUT_SUBMITTED") pollSepaTransfer(t.id);
+      } });
+    } else if (t.rail === "upi") {
+      playTimeline(t, { onDone: () => {
+        $("upi-box").classList.remove("hidden");
+        $("upi-utr").textContent = `UTR ${(t.upi || {}).utr || ""}`;
+        $("upi-note").textContent =
+          `Paid ₹${fmt(t.receiveInr)} to ${t.recipientName} · you paid €${fmt(t.sendEur)}`;
+        $("btn-again").classList.remove("hidden");
+      } });
+    } else {
+      playTimeline(t, { onDone: () => revealPickup(t) });
+    }
+    refresh();
+    addHistory(t);
+  } catch (e) { showErr("send-err", e); }
+  finally { $("btn-send").disabled = false; }
+};
+
+$("btn-pickup").onclick = async () => {
+  try {
+    const t = await api("/api/simulate/pickup", { transferId: transfer.id });
+    transfer = t;
+    $("pickup-box").classList.add("hidden");
+    playTimeline(t);
+    setTimeout(() => {
+      $("paid-box").classList.remove("hidden");
+      $("paid-note").textContent = `${t.recipientName} collected KES ${fmt(t.receiveKes)} · ref ${t.pickup.referenceCode}`;
+      $("btn-again").classList.remove("hidden");
+      updateHistory(t);
+    }, 380 * (t.txs.length + 1) + 600);
+  } catch (e) { showErr("send-err", e); }
+};
+
+$("btn-again").onclick = () => {
+  $("step-progress").classList.add("hidden");
+  $("paid-box").classList.add("hidden");
+  $("btn-again").classList.add("hidden");
+  $("pickup-box").classList.add("hidden");
+  $("sepa-box").classList.add("hidden");
+  $("upi-box").classList.add("hidden");
+  $("quote-box").classList.add("hidden");
+  $("step-quote").classList.remove("hidden");
+};
+
+/* ---------- history ---------- */
+const hist = [];
+function histRow(t) {
+  const paid = t.state === "PAID";
+  const sepa = t.rail === "sepa";
+  const upi = t.rail === "upi";
+  const sub = upi
+    ? `${t.recipientVpa || ""} · ₹${fmt(t.receiveInr)}${t.upi ? ` · UTR ${t.upi.utr}` : ""}`
+    : sepa
+      ? `${(t.recipientIban || "").slice(0, 9)}… · €${fmt(t.receiveEur)}`
+      : `ref ${t.pickup ? t.pickup.referenceCode : "—"} · KES ${fmt(t.receiveKes)}`;
+  const status = paid ? "PAID" : t.state === "FAILED" ? "FAILED"
+    : sepa ? "SEPA IN FLIGHT" : "READY FOR PICKUP";
+  const color = paid ? "var(--green)" : t.state === "FAILED" ? "var(--red)" : "var(--amber)";
+  return `
+    <div class="hic">${upi ? "🇮🇳" : sepa ? "🏦" : "🇰🇪"}</div>
+    <div class="hmain">
+      <div class="hn">${t.recipientName}</div>
+      <div class="hs">${sub}</div>
+    </div>
+    <div>
+      <div class="hamt">−€${fmt(t.sendEur)}</div>
+      <div class="hst" style="color:${color}">${status}</div>
+    </div>`;
+}
+function addHistory(t) {
+  hist.unshift(t);
+  renderHistory();
+}
+function updateHistory(t) {
+  const i = hist.findIndex((x) => x.id === t.id);
+  if (i >= 0) hist[i] = t;
+  renderHistory();
+}
+function renderHistory() {
+  const h = $("history");
+  h.innerHTML = hist.length
+    ? hist.map((t) => `<div class="hitem">${histRow(t)}</div>`).join("")
+    : '<div class="empty">No transfers yet</div>';
+}
+</script>
+</body>
+</html>

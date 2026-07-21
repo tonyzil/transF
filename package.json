@@ -1,0 +1,30 @@
+{
+  "name": "transf",
+  "version": "0.1.0",
+  "private": true,
+  "description": "On-chain remittance platform — Phase 0 corridor MVP (EUR in via IBAN, cash pickup out)",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "chain": "hardhat node",
+    "compile": "hardhat compile",
+    "deploy": "tsx scripts/deploy.ts",
+    "api": "tsx services/api/src/server.ts",
+    "test:contracts": "tsx contracts/test/run.ts",
+    "monerium:check": "tsx scripts/monerium-check.ts",
+    "stellar:check": "tsx scripts/stellar-check.ts",
+    "cctp:dryrun": "tsx scripts/cctp-dryrun.ts",
+    "e2e": "tsx scripts/e2e.ts"
+  },
+  "devDependencies": {
+    "hardhat": "^2.26.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^16.0.1",
+    "abstractionkit": "^0.4.0",
+    "express": "^4.19.0",
+    "viem": "^2.21.0"
+  }
+}
