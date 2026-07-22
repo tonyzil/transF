@@ -13,6 +13,7 @@ import {
   sep10Auth,
   sep24GetTransaction,
   sep24InitiateWithdraw,
+  sendSep24WithdrawalPayment,
   sep24WithdrawLimits,
 } from "../stellar/anchor.js";
 
@@ -30,6 +31,7 @@ export interface CashPickup {
   anchorTransactionId?: string;
   anchorAmount?: number;
   anchorAsset?: string;
+  anchorPaymentHash?: string;
   /** Last status the anchor reported, when we have polled it. */
   anchorStatus?: string;
 }
@@ -142,13 +144,73 @@ export async function createCashPickupViaAnchor(
  * not do that yet — so a real anchor will sit at pending_user_transfer_start.
  * Surfacing that truthfully beats reporting a payout that hasn't happened.
  */
-export async function refreshAnchorPickup(transferId: string): Promise<CashPickup | undefined> {
-  const pickup = pickups.get(transferId);
+export async function refreshAnchorPickup(
+  transferId: string,
+  existing?: CashPickup,
+): Promise<CashPickup | undefined> {
+  const pickup = pickups.get(transferId) ?? existing;
   if (!pickup?.anchorTransactionId || !anchorModeEnabled()) return undefined;
+  pickups.set(transferId, pickup);
   const treasury = await getTreasury();
   const jwt = await sep10Auth(STELLAR.anchorDomain, treasury);
   const status = await sep24GetTransaction(STELLAR.anchorDomain, jwt, pickup.anchorTransactionId);
   pickup.anchorStatus = status.status;
   if (status.status === "completed") pickup.status = "PAID";
   return pickup;
+}
+
+/**
+ * If the interactive SEP-24 flow has reached `pending_user_transfer_start`,
+ * send the asset to the anchor's on-ledger account and keep polling until the
+ * anchor reports completion. When the anchor is still waiting for recipient
+ * details, return the refreshed pending pickup without pretending it is paid.
+ */
+export async function fundAndRefreshAnchorPickup(
+  transferId: string,
+  existing?: CashPickup,
+  pollMs = 2_000,
+  timeoutMs = 60_000,
+): Promise<CashPickup | undefined> {
+  const pickup = await refreshAnchorPickup(transferId, existing);
+  if (!pickup?.anchorTransactionId || !pickup.anchorAmount || !pickup.anchorAsset) return pickup;
+  if (pickup.anchorStatus === "completed") return pickup;
+  if (pickup.anchorStatus && ["error", "expired", "refunded"].includes(pickup.anchorStatus)) {
+    throw new Error(`anchor withdrawal ${pickup.anchorTransactionId} is ${pickup.anchorStatus}`);
+  }
+
+  const treasury = await getTreasury();
+  const jwt = await sep10Auth(STELLAR.anchorDomain, treasury);
+  if (!pickup.anchorPaymentHash) {
+    try {
+      const sent = await sendSep24WithdrawalPayment(
+        STELLAR.anchorDomain,
+        jwt,
+        pickup.anchorTransactionId,
+        treasury,
+        pickup.anchorAsset,
+        pickup.anchorAmount,
+      );
+      pickup.anchorPaymentHash = sent.hash;
+    } catch (err: any) {
+      if (String(err?.message ?? err).includes("has not provided a withdrawal account yet")) {
+        return pickup;
+      }
+      throw err;
+    }
+  }
+
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = await sep24GetTransaction(STELLAR.anchorDomain, jwt, pickup.anchorTransactionId);
+    pickup.anchorStatus = status.status;
+    if (status.status === "completed") {
+      pickup.status = "PAID";
+      return pickup;
+    }
+    if (["error", "expired", "refunded"].includes(status.status)) {
+      throw new Error(`anchor withdrawal ${pickup.anchorTransactionId} is ${status.status}`);
+    }
+    await new Promise((r) => setTimeout(r, pollMs));
+  }
+  throw new Error(`anchor withdrawal ${pickup.anchorTransactionId} did not complete in time`);
 }

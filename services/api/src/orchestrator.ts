@@ -29,6 +29,7 @@ import {
   createCashPickup,
   createCashPickupViaAnchor,
   completePickup,
+  fundAndRefreshAnchorPickup,
   getPickup,
 } from "./adapters/moneygram.js";
 import { anchorModeEnabled, SECURITY } from "./config.js";
@@ -295,6 +296,7 @@ export async function executeTransfer(
         anchorTransactionId: pickup.anchorTransactionId,
         anchorAmount: pickup.anchorAmount,
         anchorAsset: pickup.anchorAsset,
+        anchorPaymentHash: pickup.anchorPaymentHash,
         anchorStatus: pickup.anchorStatus,
       },
     });
@@ -470,6 +472,28 @@ export async function settlePickup(transfer: Transfer): Promise<Transfer> {
     txs,
     pickup: { ...stored, status: "PAID" },
   });
+}
+
+/** Refresh an anchor-backed cash payout. If the anchor has supplied payment
+ * instructions, fund it on-ledger and mark PAID only after anchor completion. */
+export async function refreshPayout(transfer: Transfer): Promise<Transfer> {
+  if (transfer.state !== "PAYOUT_READY") return transfer;
+  if (!transfer.pickup?.anchorTransactionId) return transfer;
+  try {
+    const pickup = await fundAndRefreshAnchorPickup(transfer.id, transfer.pickup as any);
+    if (!pickup) return transfer;
+    const updated = store.updateTransfer(transfer.id, {
+      pickup: { ...transfer.pickup, ...pickup },
+    });
+    if (pickup.status === "PAID") return settlePickup(updated);
+    return updated;
+  } catch (err: any) {
+    return failAndCompensate(
+      transfer.id,
+      new Error(`anchor settlement failed: ${String(err?.message ?? err).slice(0, 200)}`),
+      transfer.txs,
+    );
+  }
 }
 
 export function pickupStatus(transferId: string) {

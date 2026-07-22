@@ -10,7 +10,16 @@
  */
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import path from "node:path";
-import { Keypair, TransactionBuilder } from "@stellar/stellar-sdk";
+import {
+  Asset,
+  BASE_FEE,
+  Horizon,
+  Keypair,
+  Memo,
+  Networks,
+  Operation,
+  TransactionBuilder,
+} from "@stellar/stellar-sdk";
 import { ROOT, STELLAR } from "../config.js";
 
 // ---------------------------------------------------------------------------
@@ -43,6 +52,7 @@ export interface AnchorInfo {
   webAuthEndpoint: string;
   transferServerSep24: string;
   signingKey?: string;
+  toml: string;
 }
 
 export async function fetchAnchorInfo(homeDomain: string): Promise<AnchorInfo> {
@@ -55,7 +65,7 @@ export async function fetchAnchorInfo(homeDomain: string): Promise<AnchorInfo> {
   if (!webAuthEndpoint || !transferServerSep24) {
     throw new Error(`${homeDomain} toml missing WEB_AUTH_ENDPOINT / TRANSFER_SERVER_SEP0024`);
   }
-  return { webAuthEndpoint, transferServerSep24, signingKey: get("SIGNING_KEY") };
+  return { webAuthEndpoint, transferServerSep24, signingKey: get("SIGNING_KEY"), toml };
 }
 
 // ---------------------------------------------------------------------------
@@ -202,5 +212,93 @@ export async function sep24GetTransaction(
     withdrawMemo: t.withdraw_memo,
     withdrawMemoType: t.withdraw_memo_type,
     moreInfoUrl: t.more_info_url,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// SEP-24 on-ledger payment: send the withdrawn asset to the anchor account.
+
+function currencyBlock(toml: string, assetCode: string): string | undefined {
+  return toml
+    .split("[[CURRENCIES]]")
+    .slice(1)
+    .find((block) => block.match(/^code\s*=\s*"([^"]+)"/m)?.[1] === assetCode);
+}
+
+export async function stellarAssetForAnchor(
+  homeDomain: string,
+  assetCode: string,
+): Promise<Asset> {
+  if (assetCode === "native" || assetCode === "XLM") return Asset.native();
+  const info = await fetchAnchorInfo(homeDomain);
+  const block = currencyBlock(info.toml, assetCode);
+  const issuer = block?.match(/^issuer\s*=\s*"([^"]+)"/m)?.[1];
+  if (!issuer) throw new Error(`${homeDomain} toml missing issuer for ${assetCode}`);
+  return new Asset(assetCode, issuer);
+}
+
+function sep24Memo(status: Sep24Status) {
+  const value = status.withdrawMemo;
+  const type = status.withdrawMemoType ?? "";
+  if (!value) return Memo.none();
+  if (type === "text") return Memo.text(value);
+  if (type === "id") return Memo.id(value);
+  if (type === "hash") return Memo.hash(value);
+  if (type === "return") return Memo.return(value);
+  throw new Error(`unsupported SEP-24 withdraw memo type: ${type}`);
+}
+
+function stellarAmount(amount: number): string {
+  if (!(amount > 0)) throw new Error("payment amount must be positive");
+  return amount.toFixed(7).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+export interface Sep24PaymentResult {
+  hash: string;
+  destination: string;
+  memo?: string;
+  memoType?: string;
+  assetCode: string;
+  amount: string;
+}
+
+export async function sendSep24WithdrawalPayment(
+  homeDomain: string,
+  jwt: string,
+  id: string,
+  source: Keypair,
+  assetCode: string,
+  amount: number,
+): Promise<Sep24PaymentResult> {
+  const status = await sep24GetTransaction(homeDomain, jwt, id);
+  if (!status.withdrawAnchorAccount) {
+    throw new Error(`SEP-24 transaction ${id} has not provided a withdrawal account yet`);
+  }
+  const server = new Horizon.Server(STELLAR.horizon);
+  const account = await server.loadAccount(source.publicKey());
+  const asset = await stellarAssetForAnchor(homeDomain, assetCode);
+  const tx = new TransactionBuilder(account, {
+    fee: BASE_FEE,
+    networkPassphrase: STELLAR.networkPassphrase || Networks.TESTNET,
+  })
+    .addOperation(
+      Operation.payment({
+        destination: status.withdrawAnchorAccount,
+        asset,
+        amount: stellarAmount(amount),
+      }),
+    )
+    .addMemo(sep24Memo(status))
+    .setTimeout(300)
+    .build();
+  tx.sign(source);
+  const submitted = await server.submitTransaction(tx);
+  return {
+    hash: submitted.hash,
+    destination: status.withdrawAnchorAccount,
+    memo: status.withdrawMemo,
+    memoType: status.withdrawMemoType,
+    assetCode,
+    amount: stellarAmount(amount),
   };
 }

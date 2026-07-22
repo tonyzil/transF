@@ -18,13 +18,13 @@
     "webauthn:selftest": "tsx scripts/webauthn-selftest.ts",
     "fp3:test": "tsx scripts/fp3-test.ts",
     "audit:deps": "npm audit",
-    "check": "npm run compile && npm run test:contracts && npm run webauthn:selftest && npm run fp3:test && npm run fp4:test && npm run webhook:test && npm run reconcile:test && npm run e2e",
+    "check": "npm run compile && npm run test:contracts && npm run webauthn:selftest && npm run fp3:test && npm run fp4:test && npm run fp5:test && npm run webhook:test && npm run reconcile:test && npm run anchor:test && npm run e2e",
     "fp5:test": "tsx scripts/fp5-binding-test.ts",
     "fp4:test": "tsx scripts/device-key-test.ts",
     "webhook:test": "tsx scripts/webhook-test.ts",
     "reconcile": "tsx scripts/reconcile.ts",
     "reconcile:test": "tsx scripts/reconcile-test.ts",
-    "anchor:test": "tsx scripts/anchor-test.ts"
+    "anchor:test": "MG_ANCHOR_DOMAIN=testanchor.stellar.org MG_ANCHOR_ASSET=native tsx scripts/anchor-test.ts"
   },
   "devDependencies": {
     "hardhat": "^2.26.0",

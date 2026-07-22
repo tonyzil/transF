@@ -17,6 +17,7 @@ import {
   sep10Auth,
   sep24GetTransaction,
   sep24InitiateWithdraw,
+  sendSep24WithdrawalPayment,
   sep24WithdrawLimits,
 } from "../services/api/src/stellar/anchor.js";
 
@@ -84,6 +85,13 @@ await t("the anchor reports the amount we asked for", async () => {
     console.log("      anchor has not populated amount_in yet (pre-interactive)");
   }
   console.log(`      status: ${status.status}`);
+});
+
+await t("on-ledger funding waits for anchor payment instructions", async () => {
+  await assert.rejects(
+    () => sendSep24WithdrawalPayment(domain, jwt, txId, treasury, asset, within),
+    /has not provided a withdrawal account yet/,
+  );
 });
 
 console.log("guard rails:");
