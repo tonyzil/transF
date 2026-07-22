@@ -448,5 +448,5 @@ if (sandbox) {
   console.log("monerium: mock mode (set MONERIUM_CLIENT_ID/SECRET in .env for sandbox)");
 }
 app.listen(API_PORT, () => {
-  console.log(`transF API listening on http://127.0.0.1:${API_PORT}`);
+  console.log(`Zoll API listening on http://127.0.0.1:${API_PORT}`);
 });

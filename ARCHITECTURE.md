@@ -1,4 +1,4 @@
-# transF — On-Chain Remittance Platform: Architecture
+# Zoll — On-Chain Remittance Platform: Architecture
 
 Status: Draft v0.1 (2026-07-19)
 
