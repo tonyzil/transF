@@ -45,6 +45,15 @@
 - Working: three payout rails (KES cash / SEPA / UPI), Candide Safe
   wallets deployed gasless with EIP-1271 Monerium linking, live anchor
   payouts, e2e green across all rails.
+- Reconciler (July 2026): services/api/src/reconcile.ts compares Monerium's
+  processed issue orders against what we mirrored, plus on-chain invariants
+  (totalCredited == sum of balances; vault tokens cover credit). Reports
+  UNMIRRORED / PHANTOM / CHAIN drift; never repairs — a system that silently
+  mints to make two ledgers agree is worse than the disagreement. Runs
+  log-only on server startup + every 15 min; `npm run reconcile` on demand,
+  `npm run reconcile:test` (6 checks) proves each drift class is caught.
+  This is ARCHITECTURE.md §6's reconciler, and it goes away when the mirror
+  seam does (Polygon: EURe native, no local mirror).
 - Known TODOs marked in code: per-transfer FX hedging. (Both earlier items
   are done: passkey assertion verification shipped with FP2, and the
   Monerium webhook no longer trusts its request body — see below.)

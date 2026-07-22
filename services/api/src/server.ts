@@ -23,6 +23,7 @@ import {
   sweepStrandedTransfers,
 } from "./orchestrator.js";
 import { isValidVpa } from "./adapters/upi.js";
+import { formatReport, reconcile } from "./reconcile.js";
 import {
   addrs,
   eur,
@@ -596,6 +597,18 @@ sweepStrandedTransfers()
   .then((n) => n && console.log(`FP3 sweep: compensated ${n} stranded transfer(s)`))
   .catch((e) => console.error(`FP3 sweep failed: ${e?.message ?? e}`));
 setInterval(() => sweepStrandedTransfers().catch(() => {}), 5 * 60_000).unref();
+
+// Reconciler: log-only, never repairs. Drift between Monerium's ledger and
+// the local vault should be loud rather than discovered later by a user
+// missing money. `npm run reconcile` runs the same check on demand.
+const runReconcile = () =>
+  reconcile()
+    .then((r) => {
+      if (!r.ok) console.warn(`LEDGER DRIFT\n${formatReport(r)}`);
+    })
+    .catch((e) => console.error(`reconcile failed: ${e?.message ?? e}`));
+setTimeout(runReconcile, 10_000).unref();
+setInterval(runReconcile, 15 * 60_000).unref();
 if (sandbox) {
   checkConnection()
     .then((ctx) => {
