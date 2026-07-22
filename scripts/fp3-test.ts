@@ -9,6 +9,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { newDevice, registerDevice, sendTransfer } from "./device.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RPC = "http://127.0.0.1:8547";
@@ -79,14 +80,13 @@ try {
   const user = await api("/api/users", { name: "Refund Tester", country: "DE" });
   token = user.sessionToken;
   await api("/api/simulate/sepa-deposit", { iban: user.iban, amountEur: 250 });
+  const device = newDevice();
+  await registerDevice(api, user.id, device);
 
   console.log("3/5 €100 cash transfer — fails after bridge lock…");
   const quote = await api("/api/quotes", { userId: user.id, sendEur: 100, rail: "cash" });
-  const t = await api("/api/transfers", {
+  const t = await sendTransfer(api, device, {
     quoteId: quote.id, recipientName: "X", recipientPhone: "+254700000000",
-  }).catch(async (e) => {
-    // 502 on FAILED is fine — fetch the transfer record instead
-    throw e;
   });
 
   console.log("4/5 asserting compensation…");

@@ -37,6 +37,15 @@ import { creditVpa } from "./adapters/upi.js";
 const MAX_SLIPPAGE_BPS = 30n;
 
 /**
+ * FP4: the user's device signature over this payment's exact terms. The
+ * orchestrator cannot produce one — it can only carry it to the vault.
+ */
+export interface PaymentAuthorization {
+  deadline: number;
+  signature: `0x${string}`;
+}
+
+/**
  * FP5: verify the live on-chain swap rate hasn't drifted past tolerance from
  * the rate the quote assumed. Throws (→ FP3 compensation) if it has, so a
  * transfer never settles at economics the user didn't agree to.
@@ -172,7 +181,11 @@ export async function sweepStrandedTransfers(): Promise<number> {
   return n;
 }
 
-export async function executeTransfer(transfer: Transfer, user: User): Promise<Transfer> {
+export async function executeTransfer(
+  transfer: Transfer,
+  user: User,
+  auth: PaymentAuthorization,
+): Promise<Transfer> {
   const a = addrs();
   const tid = transferIdHash(transfer.id);
   const txs = transfer.txs;
@@ -185,7 +198,7 @@ export async function executeTransfer(transfer: Transfer, user: User): Promise<T
       address: a.vault,
       abi: abis.RemitVault,
       functionName: "debit",
-      args: [user.address, sendWei, orchestratorAddress, tid],
+      args: [user.address, sendWei, orchestratorAddress, tid, BigInt(auth.deadline), auth.signature],
     });
     txs.push({ step: "vault.debit", hash: debitHash });
     store.updateTransfer(transfer.id, { state: "DEBITED", txs });
@@ -291,7 +304,11 @@ export async function executeTransfer(transfer: Transfer, user: User): Promise<T
  * from its INR float instantly and returns a UTR. Mock partner for now; the
  * production adapter is a licensed Indian PA/PPI (TerraPay-style API).
  */
-export async function executeUpiTransfer(transfer: Transfer, user: User): Promise<Transfer> {
+export async function executeUpiTransfer(
+  transfer: Transfer,
+  user: User,
+  auth: PaymentAuthorization,
+): Promise<Transfer> {
   const a = addrs();
   const tid = transferIdHash(transfer.id);
   const txs = transfer.txs;
@@ -302,7 +319,7 @@ export async function executeUpiTransfer(transfer: Transfer, user: User): Promis
       address: a.vault,
       abi: abis.RemitVault,
       functionName: "debit",
-      args: [user.address, sendWei, orchestratorAddress, tid],
+      args: [user.address, sendWei, orchestratorAddress, tid, BigInt(auth.deadline), auth.signature],
     });
     txs.push({ step: "vault.debit", hash: debitHash });
     store.updateTransfer(transfer.id, { state: "DEBITED", txs });
@@ -357,7 +374,11 @@ export async function executeUpiTransfer(transfer: Transfer, user: User): Promis
  * EURe on the sandbox chain — the payout falls back to a simulated SEPA leg
  * and records why, so the corridor still demos end to end.
  */
-export async function executeSepaTransfer(transfer: Transfer, user: User): Promise<Transfer> {
+export async function executeSepaTransfer(
+  transfer: Transfer,
+  user: User,
+  auth: PaymentAuthorization,
+): Promise<Transfer> {
   const a = addrs();
   const tid = transferIdHash(transfer.id);
   const txs = transfer.txs;
@@ -368,7 +389,7 @@ export async function executeSepaTransfer(transfer: Transfer, user: User): Promi
       address: a.vault,
       abi: abis.RemitVault,
       functionName: "debit",
-      args: [user.address, sendWei, orchestratorAddress, tid],
+      args: [user.address, sendWei, orchestratorAddress, tid, BigInt(auth.deadline), auth.signature],
     });
     txs.push({ step: "vault.debit", hash: debitHash });
     store.updateTransfer(transfer.id, { state: "DEBITED", txs });

@@ -16,6 +16,11 @@ export interface User {
   /** Owner key of the Safe. MVP-grade custody: needed to sign Monerium's
    *  ownership declaration and UserOperations. Production: KMS/passkeys. */
   privateKey?: `0x${string}`;
+  /** FP4: the device key allowed to authorize debits from this account. We
+   *  store only its address — the private half stays in the user's browser.
+   *  Registered once against RemitVault.authorizerOf; after that only the
+   *  device itself can rotate it. */
+  authorizerAddress?: `0x${string}`;
   wallet?: { type: "candide-safe"; deployed: boolean; deployOpHash?: string };
   /** WebAuthn credential bound to this account. Public key + counter are
    *  stored from a verified registration; login verifies assertions. */
@@ -85,6 +90,15 @@ export interface Transfer {
   receiveEur?: number; // sepa rail
   receiveInr?: number; // upi rail
   usdcOut?: number;
+  /** FP4: the terms the device is asked to authorize. Fixed when the transfer
+   *  is created so the signature covers exactly what gets submitted; the
+   *  transfer cannot leave CREATED until a matching signature arrives. */
+  auth?: {
+    to: `0x${string}`;
+    amountWei: string; // bigint as decimal string (JSON store)
+    deadline: number; // unix seconds
+    authorizedAt?: string;
+  };
   txs: { step: string; hash: string }[];
   pickup?: {
     referenceCode: string;

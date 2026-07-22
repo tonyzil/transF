@@ -29,7 +29,45 @@ const wallets = {
 };
 const orchAddr = wallets.orch.account.address;
 const rampAddr = wallets.ramp.account.address;
-const USER = "0x1111111111111111111111111111111111111111" as const;
+// The user's device key: it authorizes debits and never exists server-side.
+// (Hardhat account #9 — a throwaway, like the role keys above.)
+const userDevice = privateKeyToAccount(
+  "0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6",
+);
+const USER = userDevice.address;
+const NO_KEY_USER = "0x1111111111111111111111111111111111111111" as const;
+
+const DEADLINE = BigInt(Math.floor(Date.now() / 1000) + 3600);
+
+/** Sign a PaymentAuthorization the way the browser will. */
+async function authorize(
+  vaultAddress: `0x${string}`,
+  account: { signTypedData: (a: any) => Promise<`0x${string}`> },
+  args: { user: `0x${string}`; amount: bigint; to: `0x${string}`; transferId: `0x${string}`; deadline?: bigint },
+) {
+  const deadline = args.deadline ?? DEADLINE;
+  const signature = await account.signTypedData({
+    domain: { name: "RemitVault", version: "1", chainId: 31337, verifyingContract: vaultAddress },
+    types: {
+      PaymentAuthorization: [
+        { name: "account", type: "address" },
+        { name: "amount", type: "uint256" },
+        { name: "to", type: "address" },
+        { name: "transferId", type: "bytes32" },
+        { name: "deadline", type: "uint256" },
+      ],
+    },
+    primaryType: "PaymentAuthorization",
+    message: {
+      account: args.user,
+      amount: args.amount,
+      to: args.to,
+      transferId: args.transferId,
+      deadline,
+    },
+  });
+  return [args.user, args.amount, args.to, args.transferId, deadline, signature] as const;
+}
 
 function artifact(name: string) {
   const p = path.join(ROOT, "contracts/artifacts/contracts/src", `${name}.sol`, `${name}.json`);
@@ -138,27 +176,119 @@ async function main() {
     ),
   );
 
-  await t("orchestrator debits to its own address", async () => {
-    await write("orch", vault, "debit", [USER, E("100"), orchAddr, keccak256(toHex("t1"))]);
+  console.log("RemitVault — FP4 payment authorization:");
+  await t("debit without a registered authorizer reverts", () =>
+    expectRevert(
+      write("orch", vault, "debit", [USER, E("1"), orchAddr, keccak256(toHex("t0")), DEADLINE, "0x"]),
+      "no authorizer",
+      "debit before authorizer binding",
+    ),
+  );
+
+  await t("ramp binds the account to its device key", async () => {
+    await write("ramp", vault, "setAuthorizer", [USER, USER]);
+    assert.equal(await read(vault, "authorizerOf", [USER]), USER);
+  });
+
+  await t("ramp cannot re-point an already-bound account", () =>
+    expectRevert(
+      write("ramp", vault, "setAuthorizer", [USER, orchAddr]),
+      "not current authorizer",
+      "ramp rebinding a live account",
+    ),
+  );
+
+  await t("orchestrator cannot debit without a signature", () =>
+    expectRevert(
+      write("orch", vault, "debit", [USER, E("100"), orchAddr, keccak256(toHex("t1")), DEADLINE, "0x"]),
+      "bad authorization",
+      "unsigned debit",
+    ),
+  );
+
+  await t("a signature for different terms is rejected", async () => {
+    // Device authorizes €1; orchestrator tries to submit it for €100.
+    const signed = await authorize(vault.address, userDevice, {
+      user: USER,
+      amount: E("1"),
+      to: orchAddr,
+      transferId: keccak256(toHex("t1")),
+    });
+    await expectRevert(
+      write("orch", vault, "debit", [USER, E("100"), orchAddr, signed[3], signed[4], signed[5]]),
+      "bad authorization",
+      "amount swapped after signing",
+    );
+  });
+
+  await t("a signature from the wrong key is rejected", async () => {
+    const signed = await authorize(vault.address, wallets.orch.account as any, {
+      user: USER,
+      amount: E("100"),
+      to: orchAddr,
+      transferId: keccak256(toHex("t1")),
+    });
+    await expectRevert(
+      write("orch", vault, "debit", [...signed]),
+      "bad authorization",
+      "orchestrator self-signed authorization",
+    );
+  });
+
+  await t("an expired authorization is rejected", async () => {
+    const signed = await authorize(vault.address, userDevice, {
+      user: USER,
+      amount: E("100"),
+      to: orchAddr,
+      transferId: keccak256(toHex("t1")),
+      deadline: 1n,
+    });
+    await expectRevert(
+      write("orch", vault, "debit", [...signed]),
+      "authorization expired",
+      "past-deadline authorization",
+    );
+  });
+
+  await t("orchestrator debits with a valid authorization", async () => {
+    const signed = await authorize(vault.address, userDevice, {
+      user: USER,
+      amount: E("100"),
+      to: orchAddr,
+      transferId: keccak256(toHex("t1")),
+    });
+    await write("orch", vault, "debit", [...signed]);
     assert.equal(await read(vault, "balanceOf", [USER]), E("900"));
     assert.equal(await read(eure, "balanceOf", [orchAddr]), E("100"));
   });
 
-  await t("duplicate transferId reverts", () =>
-    expectRevert(
-      write("orch", vault, "debit", [USER, E("1"), orchAddr, keccak256(toHex("t1"))]),
+  await t("duplicate transferId reverts", async () => {
+    const signed = await authorize(vault.address, userDevice, {
+      user: USER,
+      amount: E("1"),
+      to: orchAddr,
+      transferId: keccak256(toHex("t1")),
+    });
+    await expectRevert(
+      write("orch", vault, "debit", [...signed]),
       "duplicate transfer",
       "replayed transferId",
-    ),
-  );
+    );
+  });
 
   await t("daily cap enforced", async () => {
     // Top up so the balance check passes and the cap check is what trips:
     // 100 already debited today + 2401 > 2500 cap.
     await write("deployer", eure, "mint", [vault.address, E("2000")]);
     await write("ramp", vault, "creditDeposit", [USER, E("2000"), keccak256(toHex("r3"))]);
+    const signed = await authorize(vault.address, userDevice, {
+      user: USER,
+      amount: E("2401"),
+      to: orchAddr,
+      transferId: keccak256(toHex("t2")),
+    });
     await expectRevert(
-      write("orch", vault, "debit", [USER, E("2401"), orchAddr, keccak256(toHex("t2"))]),
+      write("orch", vault, "debit", [...signed]),
       "daily cap exceeded",
       "over-cap debit",
     );
@@ -166,8 +296,14 @@ async function main() {
 
   await t("pause blocks debits", async () => {
     await write("deployer", vault, "setPaused", [true]);
+    const signed = await authorize(vault.address, userDevice, {
+      user: USER,
+      amount: E("1"),
+      to: orchAddr,
+      transferId: keccak256(toHex("t3")),
+    });
     await expectRevert(
-      write("orch", vault, "debit", [USER, E("1"), orchAddr, keccak256(toHex("t3"))]),
+      write("orch", vault, "debit", [...signed]),
       "paused",
       "debit while paused",
     );

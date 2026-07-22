@@ -10,6 +10,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { newDevice, registerDevice, signTerms } from "./device.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const API_PORT = Number(process.env.TRANSF_API_PORT ?? 3000);
@@ -89,6 +90,25 @@ async function expectApiStatus(pathname: string, status: number, body?: any) {
   assert.equal(res.status, status, `${pathname} should return ${status}`);
 }
 
+// FP4: the sender's device key. In the app this is generated in the browser
+// and gated behind the passkey; here the script plays the device. The server
+// never sees the private half.
+const device = newDevice();
+
+/** Create a transfer, sign the terms on the device, submit the signature. */
+async function sendTransfer(body: any) {
+  const created = await api("/api/transfers", body);
+  assert.equal(created.state, "CREATED", "transfer waits for device authorization");
+  assert.ok(created.authorization?.typedData, "creation returns terms to sign");
+  assert.equal(
+    created.authorization.authorizer.toLowerCase(),
+    device.address.toLowerCase(),
+    "terms are addressed to the registered device key",
+  );
+  const signature = await signTerms(device, created.authorization.typedData);
+  return { created, result: await api(`/api/transfers/${created.id}/authorize`, { signature }) };
+}
+
 async function expectApiDeleteStatus(pathname: string, status: number) {
   const headers: Record<string, string> = {};
   if (sessionToken) headers.authorization = `Bearer ${sessionToken}`;
@@ -137,6 +157,14 @@ try {
   const depRes = await api("/api/simulate/sepa-deposit", { iban: user.iban, amountEur: 250 });
   assert.equal(depRes.balanceEur, 250);
 
+  console.log("      registering device key (FP4)…");
+  const bound = await registerDevice(api, user.id, device);
+  assert.equal(bound.authorizerAddress.toLowerCase(), device.address.toLowerCase());
+  // A second device cannot take over an account that is already bound.
+  await expectApiStatus(`/api/users/${user.id}/authorizer`, 409, {
+    address: newDevice().address,
+  });
+
   console.log("5/7 quoting €100 EUR->KES…");
   const quote = await api("/api/quotes", { userId: user.id, sendEur: 100 });
   assert.ok(quote.receiveKes > 0, "quote has a KES amount");
@@ -145,7 +173,7 @@ try {
   assert.ok(Math.abs(quote.receiveKes - expected) < 1, `quote ${quote.receiveKes} ≈ ${expected}`);
 
   console.log("6/7 executing transfer…");
-  const transfer = await api("/api/transfers", {
+  const { result: transfer } = await sendTransfer({
     quoteId: quote.id,
     recipientName: "Joseph Otieno",
     recipientPhone: "+254700000000",
@@ -171,7 +199,7 @@ try {
   console.log("8/9 SEPA bank payout of €40…");
   const sepaQuote = await api("/api/quotes", { userId: user.id, sendEur: 40, rail: "sepa" });
   assert.equal(sepaQuote.receiveEur, 40 - 0.99, "sepa quote: fee only, no FX");
-  const sepaTransfer = await api("/api/transfers", {
+  const { result: sepaTransfer } = await sendTransfer({
     quoteId: sepaQuote.id,
     recipientName: "Elena Weber",
     recipientIban: "DE89 3704 0044 0532 0130 00",
@@ -187,7 +215,7 @@ try {
   // sendEur ≈ 2000 / (1.08 * 87.2 * 0.995) + 0.29
   const expectedEur = 2000 / (1.08 * 87.2 * (1 - 0.005)) + 0.29;
   assert.ok(Math.abs(upiQuote.sendEur - expectedEur) < 0.02, `upi quote ${upiQuote.sendEur} ≈ ${expectedEur}`);
-  const upiTransfer = await api("/api/transfers", {
+  const { result: upiTransfer } = await sendTransfer({
     quoteId: upiQuote.id,
     recipientVpa: "chaistand@okicici",
   });
@@ -196,6 +224,21 @@ try {
   assert.equal(upiTransfer.txs.length, 3, "upi rail: debit + approve + swap txs");
   const final = await api(`/api/users/${user.id}`);
   assert.equal(final.balanceEur, Math.round((110 - upiQuote.sendEur) * 100) / 100, "balance after upi payment");
+
+  console.log("      FP4: a payment signed by anyone but the device is refused…");
+  const balanceBefore = final.balanceEur;
+  const attackQuote = await api("/api/quotes", { userId: user.id, sendEur: 20, rail: "sepa" });
+  const attackTransfer = await api("/api/transfers", {
+    quoteId: attackQuote.id,
+    recipientName: "Mallory Attacker",
+    recipientIban: "DE89 3704 0044 0532 0130 00",
+  });
+  // The server holds the orchestrator key and every user record — and still
+  // cannot produce an authorization the vault will accept.
+  const forged = await signTerms(newDevice(), attackTransfer.authorization.typedData);
+  await expectApiStatus(`/api/transfers/${attackTransfer.id}/authorize`, 502, { signature: forged });
+  const afterAttack = await api(`/api/users/${user.id}`);
+  assert.equal(afterAttack.balanceEur, balanceBefore, "forged authorization moved no money");
   await expectApiDeleteStatus("/api/session", 204);
   await expectApiStatus(`/api/users/${user.id}`, 401);
 

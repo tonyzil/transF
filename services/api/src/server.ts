@@ -23,11 +23,24 @@ import {
   sweepStrandedTransfers,
 } from "./orchestrator.js";
 import { isValidVpa } from "./adapters/upi.js";
-import { addrs, publicClient, vaultBalance } from "./chain.js";
+import {
+  addrs,
+  eur,
+  orchestratorAddress,
+  paymentAuthorizationTypedData,
+  publicClient,
+  setVaultAuthorizer,
+  transferIdHash,
+  vaultAuthorizerOf,
+  vaultBalance,
+} from "./chain.js";
 import { smartAccountFor } from "./wallet/candide.js";
 
 const app = express();
 app.use(express.json());
+
+/** How long a device signature stays submittable (FP4). */
+const AUTH_WINDOW_SEC = 15 * 60;
 
 // ---------------------------------------------------------------------------
 // FP1: origin policy + per-IP rate limiting (dependency-free)
@@ -401,17 +414,36 @@ app.post(
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    // FP4: the account must be bound to a device key before it can spend.
+    const authorizer = await vaultAuthorizerOf(user.address);
+    if (authorizer === "0x0000000000000000000000000000000000000000") {
+      return res.status(409).json({
+        error: "no device key registered for this account — POST /api/users/:id/authorizer first",
+      });
+    }
     if (!store.consumeQuote(quote.id)) {
       return res.status(409).json({ error: "quote already consumed" });
     }
+    // Fix the exact terms the device is asked to sign. Nothing moves until a
+    // matching signature comes back to /authorize.
+    const amountWei = eur.toWei(transfer.sendEur);
+    const deadline = Math.floor(Date.now() / 1000) + AUTH_WINDOW_SEC;
+    transfer.auth = { to: orchestratorAddress, amountWei: amountWei.toString(), deadline };
     store.addTransfer(transfer);
-    const result =
-      quote.rail === "sepa"
-        ? await executeSepaTransfer(transfer, user)
-        : quote.rail === "upi"
-          ? await executeUpiTransfer(transfer, user)
-          : await executeTransfer(transfer, user);
-    res.status(result.state === "FAILED" ? 502 : 201).json(result);
+    res.status(201).json({
+      ...transfer,
+      authorization: {
+        authorizer,
+        typedData: paymentAuthorizationTypedData({
+          account: user.address,
+          amountWei,
+          to: orchestratorAddress,
+          transferId: transferIdHash(transfer.id),
+          deadline,
+        }),
+        submitTo: `/api/transfers/${transfer.id}/authorize`,
+      },
+    });
   }),
 );
 
@@ -426,6 +458,76 @@ app.get(
 );
 
 // Monerium webhook receiver (production path; polling covers local dev).
+/**
+ * FP4: register the device key that may authorize debits from this account.
+ * The browser generates the key, keeps the private half, and sends only the
+ * address. The vault accepts the first binding from the ramp role and refuses
+ * every later one from anybody but the device itself — so this endpoint can
+ * establish a binding, never steal one.
+ */
+app.post(
+  "/api/users/:id/authorizer",
+  wrap(async (req, res) => {
+    const user = store.findUser(req.params.id);
+    if (!user) return res.status(404).json({ error: "user not found" });
+    if (!requireUserSession(req, res, user.id)) return;
+    const address = req.body?.address;
+    if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return res.status(400).json({ error: "address required (0x-prefixed, 20 bytes)" });
+    }
+    const onChain = await vaultAuthorizerOf(user.address);
+    if (onChain !== "0x0000000000000000000000000000000000000000") {
+      if (onChain.toLowerCase() !== address.toLowerCase()) {
+        return res.status(409).json({
+          error: "this account is already bound to a different device key — rotate it from that device",
+          authorizerAddress: onChain,
+        });
+      }
+      return res.json(publicUser(store.updateUser(user.id, { authorizerAddress: onChain })));
+    }
+    const hash = await setVaultAuthorizer(user.address, address as `0x${string}`);
+    const updated = store.updateUser(user.id, { authorizerAddress: address as `0x${string}` });
+    res.status(201).json({ ...publicUser(updated), txHash: hash });
+  }),
+);
+
+/**
+ * FP4: submit the device signature for a CREATED transfer and execute it.
+ * The terms were fixed at creation, so the signature covers exactly what the
+ * orchestrator submits — it cannot re-price or redirect the payment.
+ */
+app.post(
+  "/api/transfers/:id/authorize",
+  wrap(async (req, res) => {
+    const transfer = store.findTransfer(req.params.id);
+    if (!transfer) return res.status(404).json({ error: "transfer not found" });
+    if (!requireUserSession(req, res, transfer.userId)) return;
+    if (transfer.state !== "CREATED") {
+      return res.status(409).json({ error: `transfer is ${transfer.state}, expected CREATED` });
+    }
+    if (!transfer.auth) return res.status(409).json({ error: "transfer has no authorization terms" });
+    const signature = req.body?.signature;
+    if (typeof signature !== "string" || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+      return res.status(400).json({ error: "signature required" });
+    }
+    if (Date.now() / 1000 > transfer.auth.deadline) {
+      return res.status(410).json({ error: "authorization window expired, create a new transfer" });
+    }
+    const user = store.findUser(transfer.userId)!;
+    store.updateTransfer(transfer.id, {
+      auth: { ...transfer.auth, authorizedAt: new Date().toISOString() },
+    });
+    const auth = { deadline: transfer.auth.deadline, signature: signature as `0x${string}` };
+    const result =
+      transfer.rail === "sepa"
+        ? await executeSepaTransfer(transfer, user, auth)
+        : transfer.rail === "upi"
+          ? await executeUpiTransfer(transfer, user, auth)
+          : await executeTransfer(transfer, user, auth);
+    res.status(result.state === "FAILED" ? 502 : 200).json(result);
+  }),
+);
+
 app.post(
   "/api/webhooks/monerium",
   wrap(async (req, res) => {
