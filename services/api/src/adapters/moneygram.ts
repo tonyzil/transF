@@ -32,6 +32,9 @@ export interface CashPickup {
   anchorAmount?: number;
   anchorAsset?: string;
   anchorPaymentHash?: string;
+  /** What the anchor reports it expects (display only — never the amount we
+   *  send; see resolvePaymentAmount). */
+  anchorAmountIn?: string;
   anchorReferenceNumber?: string;
   moreInfoUrl?: string;
   /** Last status the anchor reported, when we have polled it. */
@@ -157,7 +160,9 @@ export async function refreshAnchorPickup(
   const jwt = await sep10Auth(STELLAR.anchorDomain, treasury);
   const status = await sep24GetTransaction(STELLAR.anchorDomain, jwt, pickup.anchorTransactionId);
   pickup.anchorStatus = status.status;
-  if (status.amountIn) pickup.anchorAmount = Number(status.amountIn);
+  // Record what the anchor says, but never let it overwrite the amount we
+  // validated against its limits — that value is what we pay.
+  if (status.amountIn) pickup.anchorAmountIn = status.amountIn;
   if (status.externalTransactionId) {
     pickup.referenceCode = status.externalTransactionId;
     pickup.anchorReferenceNumber = status.externalTransactionId;
@@ -182,6 +187,10 @@ export async function fundAndRefreshAnchorPickup(
   existing?: CashPickup,
   pollMs = 2_000,
   timeoutMs = 60_000,
+  /** Called the moment a payment hash exists, before any polling. The caller
+   *  must persist it synchronously: a crash during the poll loop would
+   *  otherwise lose the record and the next run would pay a second time. */
+  onPaymentSubmitted?: (pickup: CashPickup) => void,
 ): Promise<CashPickup | undefined> {
   const pickup = await refreshAnchorPickup(transferId, existing);
   if (!pickup?.anchorTransactionId || !pickup.anchorAmount || !pickup.anchorAsset) return pickup;
@@ -204,6 +213,7 @@ export async function fundAndRefreshAnchorPickup(
         pickup.anchorAmount,
       );
       pickup.anchorPaymentHash = sent.hash;
+      onPaymentSubmitted?.(pickup);
     } catch (err: any) {
       if (String(err?.message ?? err).includes("has not provided a withdrawal account yet")) {
         return pickup;
