@@ -117,6 +117,7 @@ export interface Transfer {
     anchorAmount?: number;
     anchorAsset?: string;
     anchorPaymentHash?: string;
+    anchorAmountIn?: string;
     anchorReferenceNumber?: string;
     moreInfoUrl?: string;
     anchorStatus?: string;
