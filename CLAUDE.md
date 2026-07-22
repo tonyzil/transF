@@ -33,7 +33,13 @@
   "Receive" simulation by the user; `scripts/credit-test.ts <addr> <eur>`
   is the local shortcut.
 - Anchor: MG_ANCHOR_DOMAIN=testanchor.stellar.org → cash pickups create
-  real SEP-24 withdrawals.
+  real SEP-24 withdrawals, now carrying a validated asset amount (USDC/SRT,
+  NOT the recipient's KES — the anchor does its own FX). testanchor caps
+  withdrawals at 10 units, so corridor-sized transfers are refused there by
+  design; npm run anchor:test proves the guards live. Still NOT done: we
+  never send the asset on-ledger to the anchor's account with its memo, so
+  a real withdrawal stays at pending_user_transfer_start and no cash moves.
+  CCTP is still not wired into the pipeline (scripts/cctp-dryrun.ts only).
 - CCTP: dry-run by default; CCTP_LIVE=1 + funded CCTP_BURNER_KEY executes
   (faucet.circle.com for testnet USDC). Stellar CCTP domain is 27; mint
   recipient AND destinationCaller must be the CctpForwarder.

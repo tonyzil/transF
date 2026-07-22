@@ -23,7 +23,8 @@
     "fp4:test": "tsx scripts/device-key-test.ts",
     "webhook:test": "tsx scripts/webhook-test.ts",
     "reconcile": "tsx scripts/reconcile.ts",
-    "reconcile:test": "tsx scripts/reconcile-test.ts"
+    "reconcile:test": "tsx scripts/reconcile-test.ts",
+    "anchor:test": "tsx scripts/anchor-test.ts"
   },
   "devDependencies": {
     "hardhat": "^2.26.0",

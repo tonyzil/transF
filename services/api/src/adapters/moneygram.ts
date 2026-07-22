@@ -8,7 +8,13 @@
  */
 import { randomBytes } from "node:crypto";
 import { STELLAR, anchorModeEnabled } from "../config.js";
-import { getTreasury, sep10Auth, sep24InitiateWithdraw } from "../stellar/anchor.js";
+import {
+  getTreasury,
+  sep10Auth,
+  sep24GetTransaction,
+  sep24InitiateWithdraw,
+  sep24WithdrawLimits,
+} from "../stellar/anchor.js";
 
 export interface CashPickup {
   referenceCode: string;
@@ -18,6 +24,14 @@ export interface CashPickup {
   recipientName: string;
   recipientPhone: string;
   interactiveUrl?: string;
+  /** Anchor mode: the anchor's own transaction id, and the asset amount we
+   *  asked it to withdraw. `referenceCode` is derived from the id for display
+   *  — with real MoneyGram the agent code comes from them, not from us. */
+  anchorTransactionId?: string;
+  anchorAmount?: number;
+  anchorAsset?: string;
+  /** Last status the anchor reported, when we have polled it. */
+  anchorStatus?: string;
 }
 
 const pickups = new Map<string, CashPickup>(); // transferId -> pickup
@@ -60,28 +74,81 @@ export function completePickup(transferId: string): CashPickup | undefined {
  */
 export async function createCashPickupViaAnchor(
   transferId: string,
-  payoutKes: number,
-  recipientName: string,
-  recipientPhone: string,
+  args: {
+    /** Amount of the ANCHOR'S asset to withdraw (USDC), not the recipient's
+     *  local currency — the anchor does its own FX to cash at the counter. */
+    amountAsset: number;
+    payoutKes: number;
+    recipientName: string;
+    recipientPhone: string;
+  },
 ): Promise<CashPickup> {
   if (!anchorModeEnabled()) throw new Error("anchor mode not configured");
+  const asset = STELLAR.anchorAsset;
+  const domain = STELLAR.anchorDomain;
+
+  // Ask what the anchor accepts before opening a session it cannot honour.
+  const limits = await sep24WithdrawLimits(domain, asset);
+  if (!limits.enabled) {
+    throw new Error(`anchor ${domain} does not support withdrawing ${asset}`);
+  }
+  if (!(args.amountAsset > 0)) {
+    throw new Error(`refusing to withdraw a non-positive amount of ${asset}`);
+  }
+  if (limits.minAmount !== undefined && args.amountAsset < limits.minAmount) {
+    throw new Error(
+      `${args.amountAsset} ${asset} is below the anchor's ${limits.minAmount} minimum`,
+    );
+  }
+  if (limits.maxAmount !== undefined && args.amountAsset > limits.maxAmount) {
+    throw new Error(
+      `${args.amountAsset} ${asset} exceeds the anchor's ${limits.maxAmount} maximum — ` +
+        `${domain} caps withdrawals, so a corridor-sized transfer cannot settle here`,
+    );
+  }
+
   const treasury = await getTreasury();
-  const jwt = await sep10Auth(STELLAR.anchorDomain, treasury);
+  const jwt = await sep10Auth(domain, treasury);
   const wd = await sep24InitiateWithdraw(
-    STELLAR.anchorDomain,
+    domain,
     jwt,
-    STELLAR.anchorAsset,
+    asset,
     treasury.publicKey(),
+    String(args.amountAsset),
   );
   const pickup: CashPickup = {
     referenceCode: wd.id.replace(/-/g, "").slice(0, 8).toUpperCase(),
-    provider: `anchor:${STELLAR.anchorDomain}`,
+    provider: `anchor:${domain}`,
     status: "READY_FOR_PICKUP",
-    payoutKes,
-    recipientName,
-    recipientPhone,
+    payoutKes: args.payoutKes,
+    recipientName: args.recipientName,
+    recipientPhone: args.recipientPhone,
     interactiveUrl: wd.url,
+    anchorTransactionId: wd.id,
+    anchorAmount: args.amountAsset,
+    anchorAsset: asset,
+    anchorStatus: wd.status,
   };
   pickups.set(transferId, pickup);
+  return pickup;
+}
+
+/**
+ * Re-read an anchor-backed pickup's status from the anchor. Returns the
+ * updated pickup, or undefined when this transfer isn't anchor-backed.
+ *
+ * Note what this does and doesn't mean: SEP-24 withdrawals only complete once
+ * the asset is actually sent to the anchor's account with its memo, and we do
+ * not do that yet — so a real anchor will sit at pending_user_transfer_start.
+ * Surfacing that truthfully beats reporting a payout that hasn't happened.
+ */
+export async function refreshAnchorPickup(transferId: string): Promise<CashPickup | undefined> {
+  const pickup = pickups.get(transferId);
+  if (!pickup?.anchorTransactionId || !anchorModeEnabled()) return undefined;
+  const treasury = await getTreasury();
+  const jwt = await sep10Auth(STELLAR.anchorDomain, treasury);
+  const status = await sep24GetTransaction(STELLAR.anchorDomain, jwt, pickup.anchorTransactionId);
+  pickup.anchorStatus = status.status;
+  if (status.status === "completed") pickup.status = "PAID";
   return pickup;
 }

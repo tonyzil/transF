@@ -106,6 +106,13 @@ export interface Transfer {
     status: string;
     /** SEP-24 interactive URL (recipient-facing page at the anchor). */
     interactiveUrl?: string;
+    /** Anchor mode: the anchor's own ids/amounts, and the last status it
+     *  reported. `referenceCode` is ours; a real MoneyGram agent code is
+     *  theirs. Keeping both stops one being mistaken for the other. */
+    anchorTransactionId?: string;
+    anchorAmount?: number;
+    anchorAsset?: string;
+    anchorStatus?: string;
   };
   /** SEPA payout leg: a real Monerium redeem order in sandbox, or a mock. */
   sepa?: { mode: "sandbox" | "mock"; orderId?: string; state: string; detail?: string };

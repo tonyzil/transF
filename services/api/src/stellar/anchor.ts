@@ -59,9 +59,69 @@ export async function fetchAnchorInfo(homeDomain: string): Promise<AnchorInfo> {
 }
 
 // ---------------------------------------------------------------------------
+// SEP-24 /info: what the anchor will actually accept
+
+export interface WithdrawLimits {
+  enabled: boolean;
+  minAmount?: number;
+  maxAmount?: number;
+  feeFixed?: number;
+  feePercent?: number;
+}
+
+/**
+ * What the anchor allows for withdrawing `assetCode`. Worth asking before
+ * initiating: limits are per-anchor and small on test deployments (Stellar's
+ * public test anchor caps withdrawals at 10 units), so a transfer sized for a
+ * real corridor will be rejected — better to say so than to open a session
+ * the anchor will never honour.
+ */
+export async function sep24WithdrawLimits(
+  homeDomain: string,
+  assetCode: string,
+): Promise<WithdrawLimits> {
+  const info = await fetchAnchorInfo(homeDomain);
+  const res = await fetch(`${info.transferServerSep24}/info`);
+  if (!res.ok) throw new Error(`SEP-24 info failed (${res.status})`);
+  const data = (await res.json()) as { withdraw?: Record<string, any> };
+  const entry = data.withdraw?.[assetCode];
+  if (!entry) return { enabled: false };
+  return {
+    enabled: entry.enabled !== false,
+    minAmount: entry.min_amount,
+    maxAmount: entry.max_amount,
+    feeFixed: entry.fee_fixed,
+    feePercent: entry.fee_percent,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // SEP-10: challenge -> sign -> JWT
+//
+// JWTs are cached per (domain, account) until shortly before they expire — a
+// pickup used to cost a fresh challenge/sign/exchange round trip every time.
+
+const jwtCache = new Map<string, { token: string; expMs: number }>();
+
+function jwtExpiry(token: string): number {
+  try {
+    const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
+    return typeof payload.exp === "number" ? payload.exp * 1000 : 0;
+  } catch {
+    return 0;
+  }
+}
 
 export async function sep10Auth(homeDomain: string, keypair: Keypair): Promise<string> {
+  const cacheKey = `${homeDomain}:${keypair.publicKey()}`;
+  const hit = jwtCache.get(cacheKey);
+  if (hit && Date.now() < hit.expMs - 60_000) return hit.token;
+  const token = await sep10Exchange(homeDomain, keypair);
+  jwtCache.set(cacheKey, { token, expMs: jwtExpiry(token) || Date.now() + 10 * 60_000 });
+  return token;
+}
+
+async function sep10Exchange(homeDomain: string, keypair: Keypair): Promise<string> {
   const info = await fetchAnchorInfo(homeDomain);
   const chRes = await fetch(
     `${info.webAuthEndpoint}?account=${keypair.publicKey()}&home_domain=${homeDomain}`,
