@@ -76,7 +76,17 @@
   }
   .btn-primary-lite:hover { filter: brightness(.92); }
   .onb-terms { margin-top: 1.4rem; font-size: .68rem; color: var(--faint); }
-  .onb-terms a { color: var(--acc); text-decoration: none; }
+  .onb-terms a { color: var(--acc); text-decoration: none; cursor: pointer; }
+  .onb-steps { display: flex; gap: .4rem; justify-content: center; margin-bottom: 1.2rem; }
+  .onb-steps .dot { width: 26px; height: 5px; border-radius: 99px; background: var(--border2); transition: background .3s; }
+  .onb-steps .dot.active { background: var(--acc); }
+  .onb-steps .dot.done { background: var(--green); }
+  .pk-card {
+    text-align: left; background: var(--panel2); border: 1px solid var(--border2); border-radius: 12px;
+    padding: .9rem 1rem; font-size: .8rem; color: var(--muted); margin-top: .4rem; line-height: 1.55;
+  }
+  .pk-card b { color: var(--text); }
+  .onb-form .ghost.wide { margin-top: .6rem; }
 
   .onb-hero {
     position: relative; overflow: hidden; display: grid; place-items: center;
@@ -206,10 +216,34 @@
   .empty { color: var(--faint); font-size: .84rem; text-align: center; padding: .8rem 0; }
 
   /* ---------- send rail ---------- */
-  .tabs { display: flex; gap: .35rem; background: var(--panel2); border: 1px solid var(--border); border-radius: 999px; padding: .25rem; margin-bottom: 1rem; }
-  .tab { flex: 1; background: transparent; border: 0; color: var(--muted); font-weight: 600; font-size: .78rem; padding: .45rem .3rem; border-radius: 999px; }
-  .tab:hover { filter: none; color: var(--text); }
-  .tab.active { background: var(--acc); color: #fff; font-weight: 700; }
+  /* destination-first send flow */
+  .dest-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: .6rem; }
+  .dest-btn {
+    background: var(--panel2); border: 1px solid var(--border2); border-radius: 12px;
+    padding: .85rem .4rem; text-align: center; color: var(--muted); font-weight: 600; font-size: .78rem;
+  }
+  .dest-btn .df { font-size: 1.5rem; display: block; margin-bottom: .3rem; }
+  .dest-btn:hover { border-color: var(--acc); color: var(--text); filter: none; }
+  .stepnav { display: flex; align-items: baseline; gap: .7rem; margin-bottom: .9rem; font-size: .8rem; }
+  .stepnav a { color: var(--acc); cursor: pointer; text-decoration: none; font-weight: 700; white-space: nowrap; }
+  .stepnav span { color: var(--faint); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .opt-card {
+    display: flex; gap: .8rem; align-items: center; width: 100%; text-align: left;
+    background: var(--panel2); border: 1px solid var(--border2); border-radius: 12px;
+    padding: .85rem .9rem; margin-bottom: .6rem; color: var(--text);
+  }
+  .opt-card:hover { border-color: var(--acc); filter: none; }
+  .opt-card .oi { font-size: 1.3rem; flex: none; }
+  .opt-card .om { flex: 1; min-width: 0; }
+  .opt-card .ol { font-weight: 700; font-size: .88rem; display: flex; gap: .5rem; align-items: center; }
+  .opt-card .od { font-size: .7rem; color: var(--faint); }
+  .opt-card .ov { text-align: right; flex: none; }
+  .opt-card .oa { font-weight: 800; color: var(--green); font-size: .95rem; }
+  .opt-card .of { font-size: .66rem; color: var(--faint); }
+  .opt-card.disabled { opacity: .45; cursor: default; }
+  .opt-card.disabled:hover { border-color: var(--border2); }
+  .badge { font-size: .58rem; font-weight: 800; letter-spacing: .05em; padding: .12rem .45rem; border-radius: 999px; background: rgba(63,214,143,.12); color: var(--green); border: 1px solid rgba(63,214,143,.3); }
+  .badge.soon { background: rgba(255,176,63,.1); color: var(--amber); border-color: rgba(255,176,63,.3); }
 
   .bigamount { display: flex; align-items: center; gap: .45rem; background: var(--panel2); border: 1px solid var(--border2); border-radius: 11px; padding: .35rem .85rem; }
   .bigamount span { font-size: 1.25rem; font-weight: 700; color: var(--muted); }
@@ -267,15 +301,37 @@
     <div class="onb-left">
       <div class="onb-logo"><span class="tri">▽</span> transF</div>
       <div class="onb-form">
-        <h1>Open your Account</h1>
-        <div class="sub">A EUR account with a real IBAN, held in your own smart-account vault.</div>
-        <label>Your name</label>
-        <input id="name" placeholder="Amina Kamau" />
-        <label>Country of residence</label>
-        <input id="country" value="DE" />
-        <button class="btn-primary-lite" id="btn-create">Open my account</button>
-        <div class="error hidden" id="create-err"></div>
-        <div class="onb-terms">By signing up to create an account you accept the<br/><a href="#">Terms of use</a> &amp; <a href="#">Privacy policy</a></div>
+        <div class="onb-steps"><span class="dot active" id="ostep1"></span><span class="dot" id="ostep2"></span></div>
+
+        <div id="onb-step1">
+          <h1>Open your Account</h1>
+          <div class="sub">A EUR account with a real IBAN, held in your own smart-account vault.</div>
+          <label>Full name</label>
+          <input id="name" placeholder="Amina Kamau" />
+          <label>Email</label>
+          <input id="email" type="email" placeholder="amina@example.com" />
+          <label>Country of residence</label>
+          <input id="country" value="DE" />
+          <button class="btn-primary-lite" id="btn-continue">Continue</button>
+          <div class="error hidden" id="create-err"></div>
+          <div class="onb-terms">
+            Already have an account? <a id="link-signin">Sign in with your passkey</a><br/><br/>
+            By signing up you accept the <a href="#">Terms of use</a> &amp; <a href="#">Privacy policy</a>
+          </div>
+        </div>
+
+        <div id="onb-step2" class="hidden">
+          <h1>Secure your account</h1>
+          <div class="sub">No passwords, no seed phrases.</div>
+          <div class="pk-card">
+            🔑 <b>Your device becomes the key.</b> Face ID, fingerprint, or your
+            screen lock creates a passkey that signs you in — and will co-own
+            your smart-account vault. It never leaves your device.
+          </div>
+          <button class="btn-primary-lite" id="btn-passkey">Create passkey &amp; open account</button>
+          <button class="ghost wide" id="btn-skippk">Skip for now</button>
+          <div class="error hidden" id="pk-err"></div>
+        </div>
       </div>
     </div>
     <div class="onb-hero">
@@ -396,42 +452,47 @@
       <div class="card" id="send-card">
         <h2>Send money</h2>
         <div id="step-quote">
-          <div class="tabs">
-            <button class="tab active" data-rail="cash" id="tab-cash">🇰🇪 Cash</button>
-            <button class="tab" data-rail="sepa" id="tab-sepa">🏦 Bank</button>
-            <button class="tab" data-rail="upi" id="tab-upi">🇮🇳 UPI</button>
+          <!-- step A: amount + destination -->
+          <div id="send-dest">
+            <label style="margin-top:0">You send</label>
+            <div class="bigamount"><span id="amount-cur">€</span><input id="send-amount" value="100" inputmode="decimal" /></div>
+            <label>Where are you sending it?</label>
+            <div class="dest-grid" id="dest-grid"></div>
+            <div class="error hidden" id="dest-err"></div>
           </div>
-          <div id="upi-scan" class="hidden">
-            <label style="margin-top:0">UPI QR / merchant VPA</label>
-            <div class="row2">
-              <div><input id="upi-qr" placeholder="paste upi://pay?pa=… or merchant@okicici" /></div>
-              <button class="ghost" id="btn-scan">📷 Scan</button>
-            </div>
-            <div class="hint hidden" id="upi-parsed"></div>
-            <video id="qr-video" class="hidden" muted playsinline style="width:100%;border-radius:12px;margin-top:.6rem"></video>
-          </div>
-          <label style="margin-top:0" id="amount-label">You send</label>
-          <div class="bigamount"><span id="amount-cur">€</span><input id="send-amount" value="100" inputmode="decimal" /></div>
-          <div class="corridor small">
-            <span><span class="flag">🇪🇺</span></span><span class="arrow">─▶</span>
-            <span><span class="flag" id="corridor-flag">🇰🇪</span></span>
-            <span style="font-size:.78rem" id="corridor-desc">Recipient collects <b>KES cash</b> at any MoneyGram agent</span>
-          </div>
-          <button class="wide" id="btn-quote">Get quote</button>
 
-          <div class="quote hidden" id="quote-box">
-            <div class="qrow" id="row-mid"><span>Mid-market rate</span><span class="dotfill"></span><span id="q-mid"></span></div>
-            <div class="qrow" id="row-rate"><span>Your rate <span class="rate-badge">0.50% spread</span></span><span class="dotfill"></span><span id="q-rate"></span></div>
-            <div class="qrow"><span>Fixed fee</span><span class="dotfill"></span><span id="q-fee"></span></div>
-            <div class="qrow total"><span id="total-label">Recipient gets</span><span class="val" id="q-recv"></span></div>
-            <div class="row2" style="margin-top:.9rem" id="recipient-row">
-              <div><label style="margin-top:0">Recipient name</label><input id="rec-name" placeholder="Joseph Otieno" /></div>
-              <div id="field-phone"><label style="margin-top:0">Phone</label><input id="rec-phone" placeholder="+254 7xx…" /></div>
-              <div id="field-iban" class="hidden"><label style="margin-top:0">Recipient IBAN</label><input id="rec-iban" placeholder="DE89 3704 0044 0532 0130 00" /></div>
-            </div>
-            <button class="wide" id="btn-send">Send now</button>
+          <!-- step B: delivery options, best first -->
+          <div id="send-options" class="hidden">
+            <div class="stepnav"><a id="back-dest">‹ Amount</a><span id="opt-title"></span></div>
+            <div id="opt-list"></div>
           </div>
-          <div class="error hidden" id="send-err"></div>
+
+          <!-- step C: recipient details + quote summary -->
+          <div id="send-details" class="hidden">
+            <div class="stepnav"><a id="back-options">‹ Delivery options</a><span id="det-title"></span></div>
+            <div id="upi-scan" class="hidden">
+              <label style="margin-top:0">UPI ID or QR</label>
+              <div class="row2">
+                <div><input id="upi-qr" placeholder="paste upi://pay?pa=… or merchant@okicici" /></div>
+                <button class="ghost" id="btn-scan">📷 Scan</button>
+              </div>
+              <div class="hint hidden" id="upi-parsed"></div>
+              <video id="qr-video" class="hidden" muted playsinline style="width:100%;border-radius:12px;margin-top:.6rem"></video>
+            </div>
+            <div class="quote" id="quote-box" style="border-top:0;padding-top:0;margin-top:.2rem">
+              <div class="qrow" id="row-mid"><span>Mid-market rate</span><span class="dotfill"></span><span id="q-mid"></span></div>
+              <div class="qrow" id="row-rate"><span>Your rate <span class="rate-badge">0.50% spread</span></span><span class="dotfill"></span><span id="q-rate"></span></div>
+              <div class="qrow"><span>Fixed fee</span><span class="dotfill"></span><span id="q-fee"></span></div>
+              <div class="qrow total"><span id="total-label">Recipient gets</span><span class="val" id="q-recv"></span></div>
+              <div class="row2" style="margin-top:.9rem" id="recipient-row">
+                <div><label style="margin-top:0">Recipient name</label><input id="rec-name" placeholder="Joseph Otieno" /></div>
+                <div id="field-phone"><label style="margin-top:0">Phone</label><input id="rec-phone" placeholder="+254 7xx…" /></div>
+                <div id="field-iban" class="hidden"><label style="margin-top:0">Recipient IBAN</label><input id="rec-iban" placeholder="DE89 3704 0044 0532 0130 00" /></div>
+              </div>
+              <button class="wide" id="btn-send">Send now</button>
+            </div>
+            <div class="error hidden" id="send-err"></div>
+          </div>
         </div>
 
         <div id="step-progress" class="hidden">
@@ -556,15 +617,99 @@ function enterProvisioning(name) {
   tick();
 }
 
-$("btn-create").onclick = async () => {
+/* ---------- onboarding wizard: info -> passkey -> provisioning ---------- */
+const b64url = (buf) =>
+  btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+let pendingInfo = null;
+
+$("btn-continue").onclick = () => {
   clearErr("create-err");
-  const name = $("name").value.trim() || "Demo User";
+  const name = $("name").value.trim();
+  if (!name) return showErr("create-err", new Error("please enter your name"));
+  const email = $("email").value.trim();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+    return showErr("create-err", new Error("that email doesn't look right"));
+  }
+  pendingInfo = { name, email: email || undefined, country: $("country").value.trim() || "DE" };
+  $("onb-step1").classList.add("hidden");
+  $("onb-step2").classList.remove("hidden");
+  $("ostep1").className = "dot done";
+  $("ostep2").className = "dot active";
+};
+
+async function registerPasskey(u) {
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      rp: { name: "transF", id: location.hostname },
+      user: {
+        id: new TextEncoder().encode(u.id),
+        name: pendingInfo.email || pendingInfo.name,
+        displayName: pendingInfo.name,
+      },
+      pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+      authenticatorSelection: { residentKey: "preferred", userVerification: "preferred" },
+      timeout: 60000,
+    },
+  });
+  await api(`/api/users/${u.id}/passkey`, {
+    credentialId: cred.id,
+    attestation: b64url(cred.response.attestationObject),
+  });
+}
+
+async function createAccount(withPasskey) {
+  clearErr("pk-err");
   try {
-    const u = await api("/api/users", { name, country: $("country").value.trim() || "DE" });
+    const u = await api("/api/users", pendingInfo);
     u.balanceEur = 0;
     user = u;
     renderUser(u);
-    enterProvisioning(name);
+    if (withPasskey) {
+      try {
+        // Hard stop: some environments leave the WebAuthn ceremony pending
+        // forever instead of rejecting — never strand the user on it.
+        await Promise.race([
+          registerPasskey(u),
+          new Promise((_, rej) =>
+            setTimeout(() => rej(new Error("no response from your device — is a screen lock set up?")), 30000),
+          ),
+        ]);
+      } catch (e) {
+        showErr("pk-err", new Error(`passkey setup didn't complete (${e.message}) — continuing without it; you can add one later`));
+        await new Promise((r) => setTimeout(r, 1600));
+      }
+    }
+    enterProvisioning(pendingInfo.name);
+  } catch (e) { showErr("pk-err", e); }
+}
+
+$("btn-passkey").onclick = () => {
+  if (!window.PublicKeyCredential) {
+    showErr("pk-err", new Error("this browser doesn't support passkeys — opening account without one"));
+    return setTimeout(() => createAccount(false), 1200);
+  }
+  createAccount(true);
+};
+$("btn-skippk").onclick = () => createAccount(false);
+
+/* returning users: discoverable-credential sign-in */
+$("link-signin").onclick = async (ev) => {
+  ev.preventDefault();
+  clearErr("create-err");
+  try {
+    if (!window.PublicKeyCredential) throw new Error("passkeys aren't supported in this browser");
+    const cred = await navigator.credentials.get({
+      publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        userVerification: "preferred",
+        timeout: 60000,
+      },
+    });
+    const u = await api("/api/passkey/login", { credentialId: cred.id });
+    user = u;
+    renderUser(u);
+    enterDashboard(u.name);
   } catch (e) { showErr("create-err", e); }
 };
 
@@ -585,28 +730,105 @@ document.querySelectorAll(".copybtn").forEach((b) => {
   };
 });
 
-/* ---------- payout rail tabs ---------- */
+/* ---------- destination-first send flow ---------- */
 let rail = "cash";
-const CORRIDORS = {
-  cash: ["🇰🇪", "Recipient collects <b>KES cash</b> at any MoneyGram agent"],
-  sepa: ["🏦", "Recipient gets a <b>SEPA transfer</b> — EURe redeemed via Monerium"],
-  upi: ["🇮🇳", "Merchant gets an <b>instant UPI credit</b> in INR — settled in USDC"],
+let dest = null;
+const RAILS = {
+  cash: { icon: "💵", label: "Cash pickup", desc: "Collect at any MoneyGram agent", eta: "~10 min" },
+  sepa: { icon: "🏦", label: "Bank transfer", desc: "Any IBAN · SEPA", eta: "seconds – 1 day" },
+  upi: { icon: "⚡", label: "UPI instant", desc: "Any UPI ID or QR", eta: "instant" },
 };
-for (const tab of document.querySelectorAll(".tab")) {
-  tab.onclick = () => {
-    rail = tab.dataset.rail;
-    document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("active", t === tab));
-    $("field-phone").classList.toggle("hidden", rail !== "cash");
-    $("field-iban").classList.toggle("hidden", rail !== "sepa");
-    $("recipient-row").classList.toggle("hidden", rail === "upi");
-    $("upi-scan").classList.toggle("hidden", rail !== "upi");
-    $("amount-label").textContent = rail === "upi" ? "Amount on the bill" : "You send";
-    $("amount-cur").textContent = rail === "upi" ? "₹" : "€";
-    $("corridor-flag").textContent = CORRIDORS[rail][0];
-    $("corridor-desc").innerHTML = CORRIDORS[rail][1];
-    $("quote-box").classList.add("hidden");
-  };
+const DESTS = [
+  { code: "KE", flag: "🇰🇪", name: "Kenya", cur: "KES", rails: ["cash"], soon: [["📱", "M-Pesa wallet", "straight to their phone"]] },
+  { code: "EU", flag: "🇪🇺", name: "Europe", cur: "EUR", rails: ["sepa"], soon: [] },
+  { code: "IN", flag: "🇮🇳", name: "India", cur: "INR", rails: ["upi"], soon: [["🏦", "Bank deposit", "IMPS / NEFT"]] },
+];
+const recvOf = (q) =>
+  q.rail === "sepa" ? `€${fmt(q.receiveEur)}` : q.rail === "upi" ? `₹${fmt(q.receiveInr)}` : `KES ${fmt(q.receiveKes)}`;
+
+function showSendStep(step) {
+  $("send-dest").classList.toggle("hidden", step !== "dest");
+  $("send-options").classList.toggle("hidden", step !== "options");
+  $("send-details").classList.toggle("hidden", step !== "details");
 }
+
+$("dest-grid").innerHTML = DESTS.map(
+  (d, i) => `<button class="dest-btn" data-i="${i}"><span class="df">${d.flag}</span>${d.name}</button>`,
+).join("");
+document.querySelectorAll(".dest-btn").forEach((b) => {
+  b.onclick = () => selectDest(DESTS[Number(b.dataset.i)]);
+});
+
+async function selectDest(d) {
+  clearErr("dest-err");
+  const amt = Number($("send-amount").value);
+  if (!(amt > 0)) return showErr("dest-err", new Error("enter an amount first"));
+  dest = d;
+  $("opt-title").textContent = `€${fmt(amt)} to ${d.flag} ${d.name}`;
+  $("opt-list").innerHTML = `<div class="empty">Finding your best options…</div>`;
+  showSendStep("options");
+  try {
+    const quotes = await Promise.all(
+      d.rails.map((r) => api("/api/quotes", { userId: user.id, rail: r, sendEur: amt })),
+    );
+    // Best payout first — within one destination all quotes share a currency.
+    quotes.sort((a, b) => b.fxRate - a.fxRate);
+    $("opt-list").innerHTML = "";
+    quotes.forEach((q, i) => {
+      const m = RAILS[q.rail];
+      const el = document.createElement("button");
+      el.className = "opt-card";
+      el.innerHTML = `
+        <span class="oi">${m.icon}</span>
+        <span class="om">
+          <span class="ol">${m.label} ${i === 0 ? '<span class="badge">RECOMMENDED</span>' : ""}</span>
+          <span class="od">${m.desc} · ${m.eta} · fee €${fmt(q.fixedFeeEur)}</span>
+        </span>
+        <span class="ov"><span class="oa">${recvOf(q)}</span><br/><span class="of">recipient gets</span></span>`;
+      el.onclick = () => selectOption(q);
+      $("opt-list").appendChild(el);
+    });
+    for (const [icon, label, desc] of d.soon) {
+      const el = document.createElement("div");
+      el.className = "opt-card disabled";
+      el.innerHTML = `<span class="oi">${icon}</span>
+        <span class="om"><span class="ol">${label} <span class="badge soon">COMING SOON</span></span>
+        <span class="od">${desc}</span></span>`;
+      $("opt-list").appendChild(el);
+    }
+  } catch (e) {
+    showSendStep("dest");
+    showErr("dest-err", e);
+  }
+}
+
+function selectOption(q) {
+  quote = q;
+  rail = q.rail;
+  clearErr("send-err");
+  const m = RAILS[rail];
+  $("det-title").textContent = `${m.icon} ${m.label} · ${dest.flag} ${dest.name}`;
+  const sepa = rail === "sepa";
+  $("row-mid").classList.toggle("hidden", sepa);
+  $("row-rate").classList.toggle("hidden", sepa);
+  if (!sepa) {
+    const unit = rail === "upi" ? "INR" : "KES";
+    $("q-mid").textContent = `1 EUR = ${fmt(q.midRate, 2)} ${unit}`;
+    $("q-rate").textContent = `1 EUR = ${fmt(q.fxRate, 2)} ${unit}`;
+  }
+  $("q-fee").textContent = `€${fmt(q.fixedFeeEur)}`;
+  $("total-label").textContent = "Recipient gets";
+  $("q-recv").textContent = recvOf(q);
+  $("field-phone").classList.toggle("hidden", rail !== "cash");
+  $("field-iban").classList.toggle("hidden", rail !== "sepa");
+  $("recipient-row").classList.toggle("hidden", rail === "upi");
+  $("upi-scan").classList.toggle("hidden", rail !== "upi");
+  $("btn-send").textContent = rail === "upi" ? `Pay ${recvOf(q)} (€${fmt(q.sendEur)})` : `Send €${fmt(q.sendEur)} now`;
+  showSendStep("details");
+}
+
+$("back-dest").onclick = () => showSendStep("dest");
+$("back-options").onclick = () => showSendStep("options");
 
 /* ---------- UPI QR parsing + camera scan ---------- */
 let upiTarget = { vpa: "", name: "" };
@@ -627,11 +849,9 @@ $("upi-qr").addEventListener("input", () => {
   if (p.vpa) {
     hint.textContent = `→ pay ${p.name || p.vpa}${p.name ? ` (${p.vpa})` : ""}`;
     hint.classList.remove("hidden");
-    if (p.amount) $("send-amount").value = p.amount;
   } else {
     hint.classList.add("hidden");
   }
-  $("quote-box").classList.add("hidden");
 });
 $("btn-scan").onclick = async () => {
   clearErr("send-err");
@@ -660,39 +880,7 @@ $("btn-scan").onclick = async () => {
   } catch (e) { showErr("send-err", e); }
 };
 
-/* ---------- quote ---------- */
-$("send-amount").addEventListener("input", () => {
-  $("quote-box").classList.add("hidden");
-});
-
-$("btn-quote").onclick = async () => {
-  clearErr("send-err");
-  try {
-    const amount = Number($("send-amount").value);
-    quote = await api("/api/quotes", rail === "upi"
-      ? { userId: user.id, rail, receiveInr: amount }
-      : { userId: user.id, rail, sendEur: amount });
-    const r = quote.rail;
-    $("row-mid").classList.toggle("hidden", r === "sepa");
-    $("row-rate").classList.toggle("hidden", r === "sepa");
-    if (r !== "sepa") {
-      const unit = r === "upi" ? "INR" : "KES";
-      $("q-mid").textContent = `1 EUR = ${fmt(quote.midRate, 2)} ${unit}`;
-      $("q-rate").textContent = `1 EUR = ${fmt(quote.fxRate, 2)} ${unit}`;
-    }
-    $("q-fee").textContent = `€${fmt(quote.fixedFeeEur)}`;
-    if (r === "upi") {
-      $("total-label").textContent = "You pay";
-      $("q-recv").textContent = `€${fmt(quote.sendEur)}`;
-      $("btn-send").textContent = `Pay ₹${fmt(quote.receiveInr)} (€${fmt(quote.sendEur)})`;
-    } else {
-      $("total-label").textContent = "Recipient gets";
-      $("q-recv").textContent = r === "sepa" ? `€${fmt(quote.receiveEur)}` : `KES ${fmt(quote.receiveKes)}`;
-      $("btn-send").textContent = `Send €${fmt(quote.sendEur)} now`;
-    }
-    $("quote-box").classList.remove("hidden");
-  } catch (e) { showErr("send-err", e); }
-};
+/* quote fetching + rendering now lives in the destination flow above */
 
 /* ---------- transfer + animated timeline ---------- */
 const STEP_LABELS = {
@@ -859,8 +1047,8 @@ $("btn-again").onclick = () => {
   $("pickup-box").classList.add("hidden");
   $("sepa-box").classList.add("hidden");
   $("upi-box").classList.add("hidden");
-  $("quote-box").classList.add("hidden");
   $("step-quote").classList.remove("hidden");
+  showSendStep("dest");
 };
 
 /* ---------- history ---------- */

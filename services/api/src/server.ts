@@ -48,8 +48,11 @@ const publicUser = ({ privateKey, ...u }: User & { [k: string]: any }) => u;
 app.post(
   "/api/users",
   wrap(async (req, res) => {
-    const { name, country } = req.body ?? {};
+    const { name, country, email } = req.body ?? {};
     if (!name || !country) return res.status(400).json({ error: "name and country required" });
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return res.status(400).json({ error: "invalid email" });
+    }
     // Mock KYC: auto-approve. Real flow gates IBAN issuance on KYC pass.
     const id = randomUUID();
     // Candide Safe smart wallet: owner key + deterministic account address
@@ -60,6 +63,7 @@ app.post(
     const user: User = {
       id,
       name,
+      email,
       country,
       kycStatus: "approved",
       iban: sandbox ? "" : issueIban(id),
@@ -91,6 +95,42 @@ app.get(
       user = await refreshPendingIban(user);
     }
     const balanceEur = await vaultBalance(user.address);
+    res.json({ ...publicUser(user), balanceEur });
+  }),
+);
+
+// --- Passkeys ----------------------------------------------------------------
+// The WebAuthn credential is the account's auth factor (and future Safe
+// co-owner). NOTE: assertion-signature verification against the stored
+// attestation is a production TODO — today login binds on credential id.
+
+app.post(
+  "/api/users/:id/passkey",
+  wrap(async (req, res) => {
+    const user = store.findUser(req.params.id);
+    if (!user) return res.status(404).json({ error: "user not found" });
+    const { credentialId, attestation } = req.body ?? {};
+    if (!credentialId || typeof credentialId !== "string") {
+      return res.status(400).json({ error: "credentialId required" });
+    }
+    if (store.findUserByCredential(credentialId)) {
+      return res.status(409).json({ error: "credential already registered" });
+    }
+    const updated = store.updateUser(user.id, {
+      passkey: { credentialId, attestation, createdAt: new Date().toISOString() },
+    });
+    res.status(201).json(publicUser(updated));
+  }),
+);
+
+app.post(
+  "/api/passkey/login",
+  wrap(async (req, res) => {
+    const { credentialId } = req.body ?? {};
+    if (!credentialId) return res.status(400).json({ error: "credentialId required" });
+    const user = store.findUserByCredential(credentialId);
+    if (!user) return res.status(404).json({ error: "no account for this passkey" });
+    const balanceEur = await vaultBalance(user.address).catch(() => 0);
     res.json({ ...publicUser(user), balanceEur });
   }),
 );
@@ -130,8 +170,15 @@ app.post(
     }
     if (rail === "upi") {
       const inr = Number(receiveInr);
-      if (!(inr > 0)) return res.status(400).json({ error: "receiveInr required for upi" });
-      const quote = createQuote(userId, { rail, receiveInr: inr });
+      const eur = Number(sendEur);
+      if (!(inr > 0) && !(eur > 0)) {
+        return res.status(400).json({ error: "receiveInr or sendEur required for upi" });
+      }
+      const quote = createQuote(userId, {
+        rail,
+        receiveInr: inr > 0 ? inr : undefined,
+        sendEur: eur > 0 ? eur : undefined,
+      });
       if (quote.sendEur > FX.DAILY_CAP_EUR) {
         return res.status(400).json({ error: `amount exceeds daily cap of €${FX.DAILY_CAP_EUR}` });
       }
