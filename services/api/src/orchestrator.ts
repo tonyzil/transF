@@ -12,7 +12,7 @@
  */
 import { FX, moneriumSandboxEnabled } from "./config.js";
 import { Keypair } from "@stellar/stellar-sdk";
-import { store, type Transfer, type User } from "./store.js";
+import { store, type Transfer, type TransferState, type User } from "./store.js";
 import { redeemToIban } from "./adapters/monerium-sandbox.js";
 import { simulateSepaDeposit } from "./adapters/monerium.js";
 import { bridgeUsdcToStellar, CctpBridgeError, type CctpPlan } from "./bridge/cctp.js";
@@ -91,6 +91,15 @@ function recordCctpPlan(txs: Transfer["txs"], plan: CctpPlan) {
   if (plan.burnTxHash) txs.push({ step: "cctp.burn", hash: plan.burnTxHash });
   if (plan.attestation) txs.push({ step: "cctp.attestation", hash: plan.attestation.message.slice(0, 66) });
   txs.push({ step: "cctp.mint.prepared", hash: plan.stellarMint.contract });
+}
+
+function cashPayoutState(pickup: NonNullable<Transfer["pickup"]>): TransferState {
+  if (!pickup.anchorTransactionId) return "PAYOUT_READY";
+  if (pickup.status === "PAID" || pickup.anchorStatus === "completed") return "PAID";
+  if (pickup.anchorStatus === "pending_user_transfer_complete") return "PAYOUT_READY";
+  if (pickup.anchorPaymentHash) return "PAYOUT_FUNDED";
+  if (pickup.anchorStatus === "pending_user_transfer_start") return "PAYOUT_FUNDING_PENDING";
+  return "PAYOUT_DETAILS_PENDING";
 }
 
 /**
@@ -325,9 +334,7 @@ export async function executeTransfer(
       transfer.recipientName,
       transfer.recipientPhone ?? "",
     );
-    return store.updateTransfer(transfer.id, {
-      state: "PAYOUT_READY",
-      pickup: {
+    const storedPickup = {
         referenceCode: pickup.referenceCode,
         provider: pickup.provider,
         status: pickup.status,
@@ -339,7 +346,10 @@ export async function executeTransfer(
         anchorReferenceNumber: pickup.anchorReferenceNumber,
         moreInfoUrl: pickup.moreInfoUrl,
         anchorStatus: pickup.anchorStatus,
-      },
+      };
+    return store.updateTransfer(transfer.id, {
+      state: cashPayoutState(storedPickup),
+      pickup: storedPickup,
     });
   } catch (err: any) {
     return failAndCompensate(transfer.id, err, txs);
@@ -496,8 +506,8 @@ export async function executeSepaTransfer(
 
 /** Recipient collected the cash: settle the escrow and close the transfer. */
 export async function settlePickup(transfer: Transfer): Promise<Transfer> {
-  if (transfer.state !== "PAYOUT_READY") {
-    throw new Error(`transfer is ${transfer.state}, expected PAYOUT_READY`);
+  if (!["PAYOUT_READY", "PAYOUT_FUNDED"].includes(transfer.state)) {
+    throw new Error(`transfer is ${transfer.state}, expected PAYOUT_READY/PAYOUT_FUNDED`);
   }
   const txs = [...transfer.txs];
   const steps = new Set(txs.map((x) => x.step));
@@ -522,12 +532,15 @@ export async function settlePickup(transfer: Transfer): Promise<Transfer> {
 /** Refresh an anchor-backed cash payout. If the anchor has supplied payment
  * instructions, fund it on-ledger and mark PAID only after anchor completion. */
 export async function refreshPayout(transfer: Transfer): Promise<Transfer> {
-  if (transfer.state !== "PAYOUT_READY") return transfer;
+  if (!["PAYOUT_DETAILS_PENDING", "PAYOUT_FUNDING_PENDING", "PAYOUT_FUNDED", "PAYOUT_READY"].includes(transfer.state)) {
+    return transfer;
+  }
   if (!transfer.pickup?.anchorTransactionId) return transfer;
   try {
     const pickup = await fundAndRefreshAnchorPickup(transfer.id, transfer.pickup as any);
     if (!pickup) return transfer;
     const updated = store.updateTransfer(transfer.id, {
+      state: pickup.status === "PAID" ? "PAYOUT_FUNDED" : cashPayoutState({ ...transfer.pickup, ...pickup }),
       pickup: { ...transfer.pickup, ...pickup },
     });
     if (pickup.status === "PAID") return settlePickup(updated);
