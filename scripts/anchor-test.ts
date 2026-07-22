@@ -70,6 +70,102 @@ await t("challenge validation rejects the wrong home domain", async () => {
   );
 });
 
+await t("challenge validation rejects the wrong signing key", async () => {
+  const realServer = Keypair.random();
+  const imposterServer = Keypair.random();
+  const client = Keypair.random();
+  const challenge = WebAuth.buildChallengeTx(
+    imposterServer,
+    client.publicKey(),
+    domain,
+    300,
+    Networks.TESTNET,
+    domain,
+    "123",
+  );
+  assert.throws(
+    () =>
+      validateSep10Challenge(
+        challenge,
+        realServer.publicKey(),
+        Networks.TESTNET,
+        domain,
+        `https://${domain}/auth`,
+        client.publicKey(),
+        "123",
+      ),
+    /signature|signed|server/i,
+  );
+});
+
+await t("challenge validation rejects account and memo mismatch", async () => {
+  const server = Keypair.random();
+  const client = Keypair.random();
+  const otherClient = Keypair.random();
+  const challenge = WebAuth.buildChallengeTx(
+    server,
+    client.publicKey(),
+    domain,
+    300,
+    Networks.TESTNET,
+    domain,
+    "123",
+  );
+  assert.throws(
+    () =>
+      validateSep10Challenge(
+        challenge,
+        server.publicKey(),
+        Networks.TESTNET,
+        domain,
+        `https://${domain}/auth`,
+        otherClient.publicKey(),
+        "123",
+      ),
+    /account mismatch/,
+  );
+  assert.throws(
+    () =>
+      validateSep10Challenge(
+        challenge,
+        server.publicKey(),
+        Networks.TESTNET,
+        domain,
+        `https://${domain}/auth`,
+        client.publicKey(),
+        "456",
+      ),
+    /memo mismatch/,
+  );
+});
+
+await t("challenge validation rejects the wrong network passphrase", async () => {
+  const server = Keypair.random();
+  const client = Keypair.random();
+  const challenge = WebAuth.buildChallengeTx(
+    server,
+    client.publicKey(),
+    domain,
+    300,
+    Networks.TESTNET,
+    domain,
+    "123",
+  );
+  assert.throws(
+    () =>
+      validateSep10Challenge(
+        challenge,
+        server.publicKey(),
+        Networks.PUBLIC,
+        domain,
+        `https://${domain}/auth`,
+        client.publicKey(),
+        "123",
+      ),
+    /signature|signed|sequence|valid/i,
+  );
+});
+
 await t("custodial auth refuses a non-integer memo", async () => {
   await assert.rejects(() => sep10Auth(domain, treasury, { memo: "user-123" }), /positive integer/);
 });
