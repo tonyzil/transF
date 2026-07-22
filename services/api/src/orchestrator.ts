@@ -12,6 +12,7 @@
  */
 import { FX, moneriumSandboxEnabled } from "./config.js";
 import { Keypair } from "@stellar/stellar-sdk";
+import { AnchorPaymentUncertainError } from "./stellar/anchor.js";
 import { store, type Transfer, type User } from "./store.js";
 import { redeemToIban } from "./adapters/monerium-sandbox.js";
 import { simulateSepaDeposit } from "./adapters/monerium.js";
@@ -336,6 +337,7 @@ export async function executeTransfer(
         anchorAmount: pickup.anchorAmount,
         anchorAsset: pickup.anchorAsset,
         anchorPaymentHash: pickup.anchorPaymentHash,
+        anchorAmountIn: pickup.anchorAmountIn,
         anchorReferenceNumber: pickup.anchorReferenceNumber,
         moreInfoUrl: pickup.moreInfoUrl,
         anchorStatus: pickup.anchorStatus,
@@ -525,7 +527,20 @@ export async function refreshPayout(transfer: Transfer): Promise<Transfer> {
   if (transfer.state !== "PAYOUT_READY") return transfer;
   if (!transfer.pickup?.anchorTransactionId) return transfer;
   try {
-    const pickup = await fundAndRefreshAnchorPickup(transfer.id, transfer.pickup as any);
+    const pickup = await fundAndRefreshAnchorPickup(
+      transfer.id,
+      transfer.pickup as any,
+      undefined,
+      undefined,
+      // Persist the payment hash the moment it exists. Without this, a crash
+      // during the poll loop below loses the record and the next call pays
+      // the anchor a second time.
+      (funded) => {
+        store.updateTransfer(transfer.id, {
+          pickup: { ...transfer.pickup, ...funded },
+        });
+      },
+    );
     if (!pickup) return transfer;
     const updated = store.updateTransfer(transfer.id, {
       pickup: { ...transfer.pickup, ...pickup },
@@ -533,6 +548,19 @@ export async function refreshPayout(transfer: Transfer): Promise<Transfer> {
     if (pickup.status === "PAID") return settlePickup(updated);
     return updated;
   } catch (err: any) {
+    // A failure that may have moved money must never auto-refund the sender:
+    // that would pay twice. Same reasoning as a submitted CCTP burn.
+    const latest = store.findTransfer(transfer.id);
+    const maybePaid =
+      err instanceof AnchorPaymentUncertainError || !!latest?.pickup?.anchorPaymentHash;
+    if (maybePaid) {
+      return store.updateTransfer(transfer.id, {
+        state: "MANUAL_REVIEW",
+        error:
+          `anchor settlement unresolved: ${String(err?.message ?? err).slice(0, 200)}; ` +
+          `a Stellar payment may already have been sent, so no automatic refund`,
+      });
+    }
     return failAndCompensate(
       transfer.id,
       new Error(`anchor settlement failed: ${String(err?.message ?? err).slice(0, 200)}`),
