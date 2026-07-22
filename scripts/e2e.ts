@@ -89,6 +89,13 @@ async function expectApiStatus(pathname: string, status: number, body?: any) {
   assert.equal(res.status, status, `${pathname} should return ${status}`);
 }
 
+async function expectApiDeleteStatus(pathname: string, status: number) {
+  const headers: Record<string, string> = {};
+  if (sessionToken) headers.authorization = `Bearer ${sessionToken}`;
+  const res = await fetch(API + pathname, { method: "DELETE", headers });
+  assert.equal(res.status, status, `${pathname} should return ${status}`);
+}
+
 // Fail fast if another stack is already bound to our ports — otherwise the
 // spawns fail silently and the test talks to the wrong server.
 for (const [name, url] of [[`api :${API_PORT}`, `${API}/api/health`], [`chain :${RPC_PORT}`, RPC_URL]] as const) {
@@ -189,6 +196,8 @@ try {
   assert.equal(upiTransfer.txs.length, 3, "upi rail: debit + approve + swap txs");
   const final = await api(`/api/users/${user.id}`);
   assert.equal(final.balanceEur, Math.round((110 - upiQuote.sendEur) * 100) / 100, "balance after upi payment");
+  await expectApiDeleteStatus("/api/session", 204);
+  await expectApiStatus(`/api/users/${user.id}`, 401);
 
   console.log("\nE2E PASSED — cash corridor + SEPA exit rail + UPI scan-and-pay");
 } finally {

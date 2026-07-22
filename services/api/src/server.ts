@@ -98,8 +98,10 @@ function tokenHash(token: string) {
 
 function issueSession(userId: string) {
   const token = randomBytes(32).toString("base64url");
-  const now = new Date().toISOString();
-  store.addSession({ id: randomUUID(), userId, tokenHash: tokenHash(token), createdAt: now, lastUsedAt: now });
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const expiresAt = new Date(nowMs + SECURITY.sessionTtlMs).toISOString();
+  store.addSession({ id: randomUUID(), userId, tokenHash: tokenHash(token), createdAt: now, lastUsedAt: now, expiresAt });
   return token;
 }
 
@@ -118,6 +120,10 @@ function requireSession(req: express.Request, res: express.Response) {
   const session = store.findSessionByTokenHash(tokenHash(token));
   if (!session) {
     res.status(401).json({ error: "invalid session" });
+    return undefined;
+  }
+  if (session.revokedAt || Date.now() >= Date.parse(session.expiresAt)) {
+    res.status(401).json({ error: "session expired" });
     return undefined;
   }
   store.touchSession(session.id);
@@ -186,6 +192,16 @@ app.get(
     }
     const balanceEur = await vaultBalance(user.address);
     res.json({ ...publicUser(user), balanceEur });
+  }),
+);
+
+app.delete(
+  "/api/session",
+  wrap(async (req, res) => {
+    const session = requireSession(req, res);
+    if (!session) return;
+    store.revokeSession(session.id);
+    res.status(204).end();
   }),
 );
 
@@ -434,7 +450,8 @@ app.post(
 
 app.use(((err, _req, res, _next) => {
   console.error(err);
-  res.status(500).json({ error: String(err?.shortMessage ?? err?.message ?? err) });
+  const detail = String(err?.shortMessage ?? err?.message ?? err);
+  res.status(500).json({ error: SECURITY.exposeInternalErrors ? detail : "internal server error" });
 }) as express.ErrorRequestHandler);
 
 initStore();

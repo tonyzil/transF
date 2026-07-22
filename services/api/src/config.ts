@@ -104,6 +104,10 @@ export const SECURITY = {
   /** Simple per-IP rate limits (requests per minute). */
   rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 300),
   authRateLimitPerMin: Number(process.env.AUTH_RATE_LIMIT_PER_MIN ?? 20),
+  /** Opaque bearer session lifetime. Default: 24 hours. */
+  sessionTtlMs: Number(process.env.SESSION_TTL_MS ?? 24 * 60 * 60 * 1000),
+  /** Keep provider/chain internals out of production API responses. */
+  exposeInternalErrors: process.env.NODE_ENV !== "production",
 };
 
 // Hardhat's well-known dev accounts. On testnet/mainnet these come from a KMS.
