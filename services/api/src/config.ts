@@ -14,6 +14,10 @@ try {
 
 export const RPC_URL = process.env.TRANSF_RPC_URL ?? "http://127.0.0.1:8545";
 export const API_PORT = Number(process.env.TRANSF_API_PORT ?? 3000);
+export const API_HOST = process.env.TRANSF_API_HOST ?? "127.0.0.1";
+
+export const USING_LOCAL_RPC = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?($|\/)/.test(RPC_URL);
+export const USING_LOCAL_API_HOST = API_HOST === "127.0.0.1" || API_HOST === "localhost" || API_HOST === "::1";
 
 /**
  * Monerium integration. Mock mode by default; sandbox mode activates when
@@ -86,7 +90,7 @@ export const SECURITY = {
   /** Simulation endpoints (mock SEPA deposit, pickup) are dev-only unless
    *  explicitly re-enabled. */
   allowSimulation:
-    process.env.ALLOW_SIMULATION === "1" || process.env.NODE_ENV !== "production",
+    process.env.ALLOW_SIMULATION === "1" || (process.env.NODE_ENV !== "production" && USING_LOCAL_API_HOST),
   /** When a real rail (anchor / Monerium sandbox) fails, fall back to a
    *  simulated payout only if explicitly allowed — otherwise fail closed. */
   allowMockFallback: process.env.ALLOW_MOCK_FALLBACK === "1",
@@ -100,6 +104,10 @@ export const SECURITY = {
   /** Simple per-IP rate limits (requests per minute). */
   rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 300),
   authRateLimitPerMin: Number(process.env.AUTH_RATE_LIMIT_PER_MIN ?? 20),
+  /** Opaque bearer session lifetime. Default: 24 hours. */
+  sessionTtlMs: Number(process.env.SESSION_TTL_MS ?? 24 * 60 * 60 * 1000),
+  /** Keep provider/chain internals out of production API responses. */
+  exposeInternalErrors: process.env.NODE_ENV !== "production",
 };
 
 // Hardhat's well-known dev accounts. On testnet/mainnet these come from a KMS.
@@ -108,6 +116,10 @@ export const KEYS = {
   orchestrator: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
   ramp: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
 } as const;
+
+if (!USING_LOCAL_RPC && process.env.ALLOW_DEV_KEYS_ON_EXTERNAL_RPC !== "1") {
+  throw new Error("refusing to use hardhat development keys with a non-local RPC");
+}
 
 export interface Deployments {
   eure: `0x${string}`;

@@ -63,10 +63,14 @@ You need Node 22 or newer. Nothing else.
 ```sh
 npm install
 npm run compile        # build the contracts
-npm run test:contracts # 14 tests against a throwaway chain
+npm run test:contracts # 17 tests against a throwaway chain
 npm run e2e            # one script: deposit, then all three payout rails
 npm run dev            # chain + contracts + API + UI on localhost:3000
 ```
+
+The API binds to `127.0.0.1` by default. Set `TRANSF_API_HOST` only for a
+deliberate remote demo; mock mutation endpoints stay disabled on non-local
+hosts unless `ALLOW_SIMULATION=1` is also set.
 
 [TESTING.md](TESTING.md) is a step-by-step walkthrough, including the
 sandbox setups. The short version:
@@ -107,18 +111,21 @@ graduated from mock to real without touching the orchestrator. The intent
 is that MoneyGram, the UPI partner, and the USD side do the same.
 
 Contracts are deliberately small. `RemitVault` holds per-user balances with
-a daily cap and idempotent transfer IDs. `FxSwapper` swaps at an owner-set
-rate behind a slippage guard. `BridgeEscrow` locks funds for the bridge leg
-and can refund them. No inheritance forest, no proxy patterns — they're
+a daily cap, idempotent deposit references, and idempotent transfer IDs.
+`FxSwapper` swaps at an owner-set rate behind a slippage guard, restricted
+to approved executors and pausable by the owner.
+`BridgeEscrow` locks funds for the bridge leg, prevents completed transfer
+IDs from being reused, and can refund only to the target bound at lock time.
+No inheritance forest, no proxy patterns — they're
 meant to be read in one sitting.
 
 ## Things to know before relying on it
 
-- Passkey login matches on credential ID. Verifying the assertion
-  signature is marked TODO in `server.ts` — do not ship without it.
 - `npm run dev` resets the local chain and the demo users each start.
 - Quotes lock a rate for ten minutes; nothing hedges the exposure.
 - Webhook signature verification (Monerium) is also a marked TODO.
+- The default Hardhat keys are refused on non-local RPC URLs unless
+  `ALLOW_DEV_KEYS_ON_EXTERNAL_RPC=1` is explicitly set.
 
 None of these are surprises buried in the code; they're all flagged where
 they live.

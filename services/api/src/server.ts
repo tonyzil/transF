@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { API_PORT, FX, moneriumSandboxEnabled, SECURITY } from "./config.js";
+import { API_HOST, API_PORT, FX, moneriumSandboxEnabled, SECURITY } from "./config.js";
 import { issueChallenge, verifyAssertion, verifyRegistration } from "./webauthn.js";
 import { initStore, store, type User } from "./store.js";
 import { createQuote, isExpired } from "./fx.js";
@@ -98,8 +98,10 @@ function tokenHash(token: string) {
 
 function issueSession(userId: string) {
   const token = randomBytes(32).toString("base64url");
-  const now = new Date().toISOString();
-  store.addSession({ id: randomUUID(), userId, tokenHash: tokenHash(token), createdAt: now, lastUsedAt: now });
+  const nowMs = Date.now();
+  const now = new Date(nowMs).toISOString();
+  const expiresAt = new Date(nowMs + SECURITY.sessionTtlMs).toISOString();
+  store.addSession({ id: randomUUID(), userId, tokenHash: tokenHash(token), createdAt: now, lastUsedAt: now, expiresAt });
   return token;
 }
 
@@ -118,6 +120,10 @@ function requireSession(req: express.Request, res: express.Response) {
   const session = store.findSessionByTokenHash(tokenHash(token));
   if (!session) {
     res.status(401).json({ error: "invalid session" });
+    return undefined;
+  }
+  if (session.revokedAt || Date.now() >= Date.parse(session.expiresAt)) {
+    res.status(401).json({ error: "session expired" });
     return undefined;
   }
   store.touchSession(session.id);
@@ -186,6 +192,16 @@ app.get(
     }
     const balanceEur = await vaultBalance(user.address);
     res.json({ ...publicUser(user), balanceEur });
+  }),
+);
+
+app.delete(
+  "/api/session",
+  wrap(async (req, res) => {
+    const session = requireSession(req, res);
+    if (!session) return;
+    store.revokeSession(session.id);
+    res.status(204).end();
   }),
 );
 
@@ -341,7 +357,13 @@ app.post(
     const quote = store.findQuote(quoteId);
     if (!quote) return res.status(404).json({ error: "quote not found" });
     if (!requireUserSession(req, res, quote.userId)) return;
-    if (isExpired(quote)) return res.status(410).json({ error: "quote expired, request a new one" });
+    if ((quote.status ?? "OPEN") !== "OPEN") {
+      return res.status(409).json({ error: `quote already ${quote.status.toLowerCase()}` });
+    }
+    if (isExpired(quote)) {
+      store.updateQuote(quote.id, { status: "EXPIRED" });
+      return res.status(410).json({ error: "quote expired, request a new one" });
+    }
     if (quote.rail === "upi") {
       if (!recipientVpa || !isValidVpa(recipientVpa)) {
         return res.status(400).json({ error: "valid recipientVpa required (e.g. merchant@okicici)" });
@@ -379,6 +401,9 @@ app.post(
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    if (!store.consumeQuote(quote.id)) {
+      return res.status(409).json({ error: "quote already consumed" });
+    }
     store.addTransfer(transfer);
     const result =
       quote.rail === "sepa"
@@ -425,7 +450,8 @@ app.post(
 
 app.use(((err, _req, res, _next) => {
   console.error(err);
-  res.status(500).json({ error: String(err?.shortMessage ?? err?.message ?? err) });
+  const detail = String(err?.shortMessage ?? err?.message ?? err);
+  res.status(500).json({ error: SECURITY.exposeInternalErrors ? detail : "internal server error" });
 }) as express.ErrorRequestHandler);
 
 initStore();
@@ -447,6 +473,6 @@ if (sandbox) {
 } else {
   console.log("monerium: mock mode (set MONERIUM_CLIENT_ID/SECRET in .env for sandbox)");
 }
-app.listen(API_PORT, () => {
-  console.log(`Zoll API listening on http://127.0.0.1:${API_PORT}`);
+app.listen(API_PORT, API_HOST, () => {
+  console.log(`Zoll API listening on http://${API_HOST}:${API_PORT}`);
 });
