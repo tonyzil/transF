@@ -80,6 +80,11 @@ export const STELLAR = {
   // domain with a partner-onboarded account.
   anchorDomain: process.env.MG_ANCHOR_DOMAIN ?? "",
   anchorAsset: process.env.MG_ANCHOR_ASSET ?? "SRT", // testanchor's reference token
+  // MoneyGram production may require SEP-10 custodial auth to include a
+  // positive integer memo identifying the end user behind a shared account.
+  authMemo: process.env.MG_AUTH_MEMO ?? "",
+  clientDomain: process.env.MG_CLIENT_DOMAIN ?? "",
+  clientDomainSigningSecret: process.env.MG_CLIENT_DOMAIN_SIGNING_SECRET ?? "",
   treasurySecret: process.env.STELLAR_TREASURY_SECRET ?? "",
 };
 

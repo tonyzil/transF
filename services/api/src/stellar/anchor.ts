@@ -19,6 +19,7 @@ import {
   Networks,
   Operation,
   TransactionBuilder,
+  WebAuth,
 } from "@stellar/stellar-sdk";
 import { ROOT, STELLAR } from "../config.js";
 
@@ -122,31 +123,96 @@ function jwtExpiry(token: string): number {
   }
 }
 
-export async function sep10Auth(homeDomain: string, keypair: Keypair): Promise<string> {
-  const cacheKey = `${homeDomain}:${keypair.publicKey()}`;
+export interface Sep10AuthOptions {
+  /** SEP-10 custodial auth memo. Must be a positive integer string. */
+  memo?: string;
+  /** Optional wallet/client domain for SEP-10 client attribution. */
+  clientDomain?: string;
+  /** Secret for that client domain's SIGNING_KEY, when client attribution is required. */
+  clientDomainSigningSecret?: string;
+}
+
+function sep10Options(): Sep10AuthOptions {
+  return {
+    memo: STELLAR.authMemo || undefined,
+    clientDomain: STELLAR.clientDomain || undefined,
+    clientDomainSigningSecret: STELLAR.clientDomainSigningSecret || undefined,
+  };
+}
+
+function assertCustodialMemo(memo?: string) {
+  if (!memo) return;
+  if (!/^[1-9]\d*$/.test(memo)) throw new Error("SEP-10 custodial memo must be a positive integer string");
+}
+
+export function validateSep10Challenge(
+  challengeXdr: string,
+  serverSigningKey: string,
+  networkPassphrase: string,
+  homeDomain: string,
+  webAuthEndpoint: string,
+  account: string,
+  expectedMemo?: string,
+) {
+  const { tx, clientAccountID, memo } = WebAuth.readChallengeTx(
+    challengeXdr,
+    serverSigningKey,
+    networkPassphrase,
+    homeDomain,
+    new URL(webAuthEndpoint).hostname,
+  );
+  if (clientAccountID !== account) throw new Error(`SEP-10 challenge account mismatch: ${clientAccountID}`);
+  if ((expectedMemo ?? null) !== memo) throw new Error("SEP-10 challenge memo mismatch");
+  return tx;
+}
+
+export async function sep10Auth(
+  homeDomain: string,
+  keypair: Keypair,
+  options: Sep10AuthOptions = sep10Options(),
+): Promise<string> {
+  const memo = options.memo?.trim();
+  assertCustodialMemo(memo);
+  const cacheKey = `${homeDomain}:${keypair.publicKey()}:${memo ?? ""}:${options.clientDomain ?? ""}`;
   const hit = jwtCache.get(cacheKey);
   if (hit && Date.now() < hit.expMs - 60_000) return hit.token;
-  const token = await sep10Exchange(homeDomain, keypair);
+  const token = await sep10Exchange(homeDomain, keypair, { ...options, memo });
   jwtCache.set(cacheKey, { token, expMs: jwtExpiry(token) || Date.now() + 10 * 60_000 });
   return token;
 }
 
-async function sep10Exchange(homeDomain: string, keypair: Keypair): Promise<string> {
+async function sep10Exchange(homeDomain: string, keypair: Keypair, options: Sep10AuthOptions): Promise<string> {
   const info = await fetchAnchorInfo(homeDomain);
-  const chRes = await fetch(
-    `${info.webAuthEndpoint}?account=${keypair.publicKey()}&home_domain=${homeDomain}`,
-  );
+  if (!info.signingKey) throw new Error(`${homeDomain} toml missing SIGNING_KEY`);
+  const url = new URL(info.webAuthEndpoint);
+  url.searchParams.set("account", keypair.publicKey());
+  url.searchParams.set("home_domain", homeDomain);
+  if (options.memo) url.searchParams.set("memo", options.memo);
+  if (options.clientDomain) url.searchParams.set("client_domain", options.clientDomain);
+  const chRes = await fetch(url);
   if (!chRes.ok) throw new Error(`SEP-10 challenge failed (${chRes.status}): ${await chRes.text()}`);
   const { transaction, network_passphrase } = (await chRes.json()) as {
     transaction: string;
     network_passphrase?: string;
   };
 
-  const tx = TransactionBuilder.fromXDR(
+  const network = network_passphrase ?? STELLAR.networkPassphrase;
+  const tx = validateSep10Challenge(
     transaction,
-    network_passphrase ?? STELLAR.networkPassphrase,
+    info.signingKey,
+    network,
+    homeDomain,
+    info.webAuthEndpoint,
+    keypair.publicKey(),
+    options.memo,
   );
   tx.sign(keypair);
+  if (options.clientDomain) {
+    if (!options.clientDomainSigningSecret) {
+      throw new Error("SEP-10 client_domain requires MG_CLIENT_DOMAIN_SIGNING_SECRET");
+    }
+    tx.sign(Keypair.fromSecret(options.clientDomainSigningSecret));
+  }
 
   const tokRes = await fetch(info.webAuthEndpoint, {
     method: "POST",
