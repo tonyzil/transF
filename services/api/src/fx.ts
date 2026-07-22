@@ -26,6 +26,8 @@ export function createQuote(userId: string, req: QuoteRequest): Quote {
     receiveKes: 0,
     receiveEur: 0,
     receiveInr: 0,
+    // FP5: bind quoted economics to the on-chain swap rate (cash/upi rails).
+    lockedSwapRate: String(FX.swapRate()),
     expiresAt: new Date(Date.now() + FX.QUOTE_TTL_MS).toISOString(),
     createdAt: new Date().toISOString(),
   };

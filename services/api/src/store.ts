@@ -51,6 +51,10 @@ export interface Quote {
   receiveEur: number; // sepa rail (0 otherwise)
   receiveInr: number; // upi rail (0 otherwise) — INR-fixed: this drives sendEur
   midRate: number;
+  /** FP5: the on-chain FxSwapper rate (tokenOut units per 1e18 tokenIn) this
+   *  quote's economics assume. Execution refuses to swap if the live rate has
+   *  drifted past tolerance — binds quoted price to settlement price. */
+  lockedSwapRate?: string;
   expiresAt: string;
   createdAt: string;
 }
