@@ -197,6 +197,10 @@ export const store = {
   findUserByCredential(credentialId: string) {
     return db.users.find((u) => u.passkey?.credentialId === credentialId);
   },
+  /** Every Monerium order id we have mirrored into the vault. */
+  mirroredOrderIds(): string[] {
+    return [...db.processedMoneriumOrders];
+  },
   isOrderProcessed(orderId: string) {
     return db.processedMoneriumOrders.includes(orderId);
   },

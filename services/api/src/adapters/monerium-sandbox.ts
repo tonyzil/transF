@@ -244,6 +244,14 @@ export async function mirrorOrderById(orderId: string): Promise<boolean> {
   return mirrorOrder(order);
 }
 
+/** Every processed `issue` order Monerium knows about — the reconciler's
+ *  view of what should have been credited locally. */
+export async function listProcessedIssueOrders(): Promise<MoneriumOrder[]> {
+  return orderList(await getClient().orders()).filter(
+    (o) => o.kind === "issue" && isProcessed(o),
+  );
+}
+
 /**
  * One poll cycle: mirror new processed `issue` orders into the local vault.
  * Returns the number of deposits credited.
