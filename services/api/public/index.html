@@ -944,6 +944,8 @@ const STEP_LABELS = {
   "usdc.approve(bridge)": ["Authorizing bridge escrow", "🔏"],
   "bridge.lockForPayout": ["Locking USDC for Stellar payout", "🌉"],
   "bridge.settle": ["Escrow settled on-chain", "✅"],
+  "bridge.release": ["Releasing escrow for refund", "↩️"],
+  "vault.refundCredit": ["Refunding your vault", "💶"],
 };
 
 /** Synthetic (off-chain) steps appended after the tx steps per rail. */
@@ -1116,9 +1118,10 @@ function histRow(t) {
     : sepa
       ? `${(t.recipientIban || "").slice(0, 9)}… · €${fmt(t.receiveEur)}`
       : `ref ${t.pickup ? t.pickup.referenceCode : "—"} · KES ${fmt(t.receiveKes)}`;
-  const status = paid ? "PAID" : t.state === "FAILED" ? "FAILED"
+  const status = paid ? "PAID" : t.state === "REFUNDED" ? "REFUNDED" : t.state === "FAILED" ? "FAILED"
     : sepa ? "SEPA IN FLIGHT" : "READY FOR PICKUP";
-  const color = paid ? "var(--green)" : t.state === "FAILED" ? "var(--red)" : "var(--amber)";
+  const color = paid ? "var(--green)" : t.state === "REFUNDED" ? "var(--muted)"
+    : t.state === "FAILED" ? "var(--red)" : "var(--amber)";
   return `
     <div class="hic">${upi ? "🇮🇳" : sepa ? "🏦" : "🇰🇪"}</div>
     <div class="hmain">

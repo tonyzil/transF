@@ -62,7 +62,8 @@ export type TransferState =
   | "PAYOUT_READY"
   | "PAYOUT_SUBMITTED"
   | "PAID"
-  | "FAILED";
+  | "FAILED"
+  | "REFUNDED";
 
 export interface Transfer {
   id: string;
@@ -92,6 +93,14 @@ export interface Transfer {
   /** UPI payout leg (mock partner): UTR is the bank-side reference. */
   upi?: { provider: string; utr: string; state: string };
   error?: string;
+  /** FP3: automated compensation after failure. Refund amount depends on
+   *  which step failed — costs incurred up to that point are itemized. */
+  refund?: {
+    amountEur: number;
+    recoveredFrom: string; // furthest completed step
+    deductions: string;
+    at: string;
+  };
   createdAt: string;
   updatedAt: string;
 }

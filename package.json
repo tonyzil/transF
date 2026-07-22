@@ -15,7 +15,8 @@
     "stellar:check": "tsx scripts/stellar-check.ts",
     "cctp:dryrun": "tsx scripts/cctp-dryrun.ts",
     "e2e": "tsx scripts/e2e.ts",
-    "webauthn:selftest": "tsx scripts/webauthn-selftest.ts"
+    "webauthn:selftest": "tsx scripts/webauthn-selftest.ts",
+    "fp3:test": "tsx scripts/fp3-test.ts"
   },
   "devDependencies": {
     "hardhat": "^2.26.0",

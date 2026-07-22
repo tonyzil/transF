@@ -15,7 +15,13 @@ import {
   refreshPendingIban,
   startDepositPoller,
 } from "./adapters/monerium-sandbox.js";
-import { executeSepaTransfer, executeTransfer, executeUpiTransfer, settlePickup } from "./orchestrator.js";
+import {
+  executeSepaTransfer,
+  executeTransfer,
+  executeUpiTransfer,
+  settlePickup,
+  sweepStrandedTransfers,
+} from "./orchestrator.js";
 import { isValidVpa } from "./adapters/upi.js";
 import { addrs, publicClient, vaultBalance } from "./chain.js";
 import { smartAccountFor } from "./wallet/candide.js";
@@ -423,6 +429,12 @@ app.use(((err, _req, res, _next) => {
 }) as express.ErrorRequestHandler);
 
 initStore();
+// FP3: compensate anything stranded by a crash or failed payout, then keep
+// sweeping in the background.
+sweepStrandedTransfers()
+  .then((n) => n && console.log(`FP3 sweep: compensated ${n} stranded transfer(s)`))
+  .catch((e) => console.error(`FP3 sweep failed: ${e?.message ?? e}`));
+setInterval(() => sweepStrandedTransfers().catch(() => {}), 5 * 60_000).unref();
 if (sandbox) {
   checkConnection()
     .then((ctx) => {

@@ -45,8 +45,10 @@ per-IP rate limits, and full server-side WebAuthn: challenge endpoint, CBOR
 attestation parsing -> COSE key stored, assertion signature+rpIdHash+counter
 verified before sessions (services/api/src/webauthn.ts, selftest script
 npm run webauthn:selftest). Still open, in fix order:
-FP3: automated failure compensation (resumable orchestrator, auto
-BridgeEscrow.release + vault refund).
+FP3 DONE (July 2026): failures auto-compensate (escrow release + vault
+re-credit at current rates, itemized deductions, REFUNDED state), startup +
+5-min sweep recovers stranded transfers; FORCE_FAIL_STEP test hook,
+npm run fp3:test.
 FP4: key custody — passkey-as-Safe-owner or KMS; no plaintext keys.
 FP5 (with Base deploy): multisig/timelock on contracts, tiered caps;
 quote↔execution binding via Bebop executable quotes.
