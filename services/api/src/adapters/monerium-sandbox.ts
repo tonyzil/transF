@@ -203,6 +203,48 @@ function isProcessed(o: MoneriumOrder): boolean {
 }
 
 /**
+ * Mirror one order that came from Monerium's own API into the local vault.
+ *
+ * The caller must have fetched `order` from Monerium — never pass in an
+ * object built from a request body. Amount and address are taken from the
+ * order, and `markOrderProcessed` makes a repeat a no-op.
+ */
+async function mirrorOrder(order: MoneriumOrder): Promise<boolean> {
+  if (order.kind !== "issue" || !isProcessed(order)) return false;
+  if (store.isOrderProcessed(order.id)) return false;
+  const user = store.findUserByAddress(order.address);
+  if (!user) return false;
+  const amount = Number(order.amount);
+  if (!(amount > 0)) return false;
+  await simulateSepaDeposit(user.address, amount, `monerium:${order.id}`);
+  store.markOrderProcessed(order.id);
+  console.log(`monerium: mirrored issue order ${order.id} (€${amount}) for ${user.name}`);
+  return true;
+}
+
+/**
+ * Mirror an order named only by id, re-reading it from Monerium first.
+ *
+ * This is what makes the webhook safe: a caller can name an order but cannot
+ * state its amount, its address, or whether it settled — those come from
+ * Monerium over an authenticated client-credentials connection. The worst a
+ * forged payload achieves is asking us to re-check a real order, which is
+ * idempotent.
+ */
+export async function mirrorOrderById(orderId: string): Promise<boolean> {
+  if (store.isOrderProcessed(orderId)) return false;
+  let order: MoneriumOrder;
+  try {
+    order = await getClient().getOrder(orderId);
+  } catch (err: any) {
+    console.warn(`monerium: refusing unknown order ${orderId}: ${err?.message ?? err}`);
+    return false;
+  }
+  if (order.id !== orderId) return false;
+  return mirrorOrder(order);
+}
+
+/**
  * One poll cycle: mirror new processed `issue` orders into the local vault.
  * Returns the number of deposits credited.
  */
@@ -210,16 +252,7 @@ export async function pollDepositsOnce(): Promise<number> {
   const res = await getClient().orders();
   let credited = 0;
   for (const order of orderList(res)) {
-    if (order.kind !== "issue" || !isProcessed(order)) continue;
-    if (store.isOrderProcessed(order.id)) continue;
-    const user = store.findUserByAddress(order.address);
-    if (!user) continue;
-    const amount = Number(order.amount);
-    if (!(amount > 0)) continue;
-    await simulateSepaDeposit(user.address, amount, `monerium:${order.id}`);
-    store.markOrderProcessed(order.id);
-    credited++;
-    console.log(`monerium: mirrored issue order ${order.id} (€${amount}) for ${user.name}`);
+    if (await mirrorOrder(order)) credited++;
   }
   return credited;
 }
@@ -269,17 +302,20 @@ export function startDepositPoller() {
 }
 
 /**
- * Webhook receiver (production path — needs a public URL). Handles
- * order.updated events for processed issue orders; same idempotent mirroring
- * as the poller. NOTE: signature verification is a production TODO.
+ * Webhook receiver (production path — needs a public URL).
+ *
+ * The body is treated as untrusted: we read an order id out of it and throw
+ * the rest away, then re-read that order from Monerium. Previously this
+ * endpoint credited whatever address and amount the request stated, which
+ * made it an unauthenticated mint for anyone who could reach the port.
+ *
+ * A shared secret (MONERIUM_WEBHOOK_SECRET) gates it further when set — see
+ * verifyWebhookSignature in server.ts. Both controls are worth having: the
+ * secret keeps strangers out, the re-read means even a leaked secret cannot
+ * fabricate a deposit.
  */
 export async function handleWebhookEvent(event: any): Promise<{ handled: boolean }> {
-  const order: MoneriumOrder | undefined = event?.data ?? event?.order;
-  if (!order?.id || order.kind !== "issue" || !isProcessed(order)) return { handled: false };
-  if (store.isOrderProcessed(order.id)) return { handled: true };
-  const user = store.findUserByAddress(order.address);
-  if (!user) return { handled: false };
-  await simulateSepaDeposit(user.address, Number(order.amount), `monerium:${order.id}`);
-  store.markOrderProcessed(order.id);
-  return { handled: true };
+  const id = event?.data?.id ?? event?.order?.id ?? event?.id;
+  if (!id || typeof id !== "string") return { handled: false };
+  return { handled: await mirrorOrderById(id) };
 }
