@@ -681,10 +681,13 @@ $("btn-continue").onclick = () => {
   $("ostep2").className = "dot active";
 };
 
+const b64urlToBytes = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+
 async function registerPasskey(u) {
+  const { challenge } = await api("/api/webauthn/challenge", { purpose: "register" });
   const cred = await navigator.credentials.create({
     publicKey: {
-      challenge: crypto.getRandomValues(new Uint8Array(32)),
+      challenge: b64urlToBytes(challenge),
       rp: { name: "transF", id: location.hostname },
       user: {
         id: new TextEncoder().encode(u.id),
@@ -699,6 +702,7 @@ async function registerPasskey(u) {
   await api(`/api/users/${u.id}/passkey`, {
     credentialId: cred.id,
     attestation: b64url(cred.response.attestationObject),
+    clientDataJSON: b64url(cred.response.clientDataJSON),
   });
 }
 
@@ -743,14 +747,20 @@ $("link-signin").onclick = async (ev) => {
   clearErr("create-err");
   try {
     if (!window.PublicKeyCredential) throw new Error("passkeys aren't supported in this browser");
+    const { challenge } = await api("/api/webauthn/challenge", { purpose: "login" });
     const cred = await navigator.credentials.get({
       publicKey: {
-        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        challenge: b64urlToBytes(challenge),
         userVerification: "preferred",
         timeout: 60000,
       },
     });
-    const u = await api("/api/passkey/login", { credentialId: cred.id });
+    const u = await api("/api/passkey/login", {
+      credentialId: cred.id,
+      authenticatorData: b64url(cred.response.authenticatorData),
+      clientDataJSON: b64url(cred.response.clientDataJSON),
+      signature: b64url(cred.response.signature),
+    });
     user = u;
     renderUser(u);
     enterDashboard(u.name);

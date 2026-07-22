@@ -3,7 +3,8 @@ import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { API_PORT, FX, moneriumSandboxEnabled } from "./config.js";
+import { API_PORT, FX, moneriumSandboxEnabled, SECURITY } from "./config.js";
+import { issueChallenge, verifyAssertion, verifyRegistration } from "./webauthn.js";
 import { initStore, store, type User } from "./store.js";
 import { createQuote, isExpired } from "./fx.js";
 import { issueIban, simulateSepaDeposit } from "./adapters/monerium.js";
@@ -21,6 +22,45 @@ import { smartAccountFor } from "./wallet/candide.js";
 
 const app = express();
 app.use(express.json());
+
+// ---------------------------------------------------------------------------
+// FP1: origin policy + per-IP rate limiting (dependency-free)
+
+// State-changing requests from foreign origins are refused outright; allowed
+// origins get explicit CORS headers, everyone else gets none.
+app.use((req, res, next) => {
+  const origin = req.header("origin");
+  if (origin && SECURITY.origins.includes(origin)) {
+    res.setHeader("access-control-allow-origin", origin);
+    res.setHeader("access-control-allow-headers", "content-type, authorization");
+    res.setHeader("access-control-allow-methods", "GET, POST");
+    if (req.method === "OPTIONS") return res.status(204).end();
+  } else if (origin && req.method !== "GET" && req.method !== "OPTIONS") {
+    return res.status(403).json({ error: "origin not allowed" });
+  }
+  next();
+});
+
+const hits = new Map<string, { n: number; reset: number }>();
+function rateLimit(key: string, perMin: number): boolean {
+  const now = Date.now();
+  const h = hits.get(key);
+  if (!h || h.reset < now) {
+    hits.set(key, { n: 1, reset: now + 60_000 });
+    if (hits.size > 10_000) for (const [k, v] of hits) if (v.reset < now) hits.delete(k);
+    return true;
+  }
+  return ++h.n <= perMin;
+}
+app.use("/api", (req, res, next) => {
+  const ip = req.ip ?? "?";
+  const authRoute = req.path.startsWith("/passkey") || (req.path === "/users" && req.method === "POST");
+  const ok = authRoute
+    ? rateLimit(`a:${ip}`, SECURITY.authRateLimitPerMin)
+    : rateLimit(`g:${ip}`, SECURITY.rateLimitPerMin);
+  if (!ok) return res.status(429).json({ error: "rate limited — slow down" });
+  next();
+});
 
 const pub = path.join(path.dirname(fileURLToPath(import.meta.url)), "../public");
 app.use(express.static(pub));
@@ -143,10 +183,18 @@ app.get(
   }),
 );
 
-// --- Passkeys ----------------------------------------------------------------
-// The WebAuthn credential is the account's auth factor (and future Safe
-// co-owner). NOTE: assertion-signature verification against the stored
-// attestation is a production TODO — today login binds on credential id.
+// --- Passkeys (FP2: full WebAuthn verification) ------------------------------
+// Registration parses and verifies the attestation (challenge, origin,
+// rpIdHash) and stores the COSE public key + sign counter. Login verifies the
+// assertion signature server-side before a session is issued.
+
+app.post(
+  "/api/webauthn/challenge",
+  wrap(async (req, res) => {
+    const purpose = req.body?.purpose === "register" ? "register" : "login";
+    res.json({ challenge: issueChallenge(purpose), rpId: SECURITY.rpId });
+  }),
+);
 
 app.post(
   "/api/users/:id/passkey",
@@ -154,15 +202,31 @@ app.post(
     const user = store.findUser(req.params.id);
     if (!user) return res.status(404).json({ error: "user not found" });
     if (!requireUserSession(req, res, user.id)) return;
-    const { credentialId, attestation } = req.body ?? {};
-    if (!credentialId || typeof credentialId !== "string") {
-      return res.status(400).json({ error: "credentialId required" });
+    const { credentialId, attestation, clientDataJSON } = req.body ?? {};
+    if (!credentialId || typeof credentialId !== "string" || !attestation || !clientDataJSON) {
+      return res.status(400).json({ error: "credentialId, attestation and clientDataJSON required" });
     }
     if (store.findUserByCredential(credentialId)) {
       return res.status(409).json({ error: "credential already registered" });
     }
+    let reg;
+    try {
+      reg = verifyRegistration(attestation, clientDataJSON, SECURITY.rpId, SECURITY.origins);
+    } catch (err: any) {
+      return res.status(400).json({ error: String(err?.message ?? err) });
+    }
+    if (reg.credentialId !== credentialId) {
+      return res.status(400).json({ error: "credentialId does not match attestation" });
+    }
     const updated = store.updateUser(user.id, {
-      passkey: { credentialId, attestation, createdAt: new Date().toISOString() },
+      passkey: {
+        credentialId,
+        publicKey: reg.key,
+        signCount: reg.signCount,
+        rpId: SECURITY.rpId,
+        attestation,
+        createdAt: new Date().toISOString(),
+      },
     });
     res.status(201).json(publicUser(updated));
   }),
@@ -171,10 +235,28 @@ app.post(
 app.post(
   "/api/passkey/login",
   wrap(async (req, res) => {
-    const { credentialId } = req.body ?? {};
-    if (!credentialId) return res.status(400).json({ error: "credentialId required" });
+    const { credentialId, authenticatorData, clientDataJSON, signature } = req.body ?? {};
+    if (!credentialId || !authenticatorData || !clientDataJSON || !signature) {
+      return res.status(400).json({ error: "credentialId, authenticatorData, clientDataJSON and signature required" });
+    }
     const user = store.findUserByCredential(credentialId);
-    if (!user) return res.status(404).json({ error: "no account for this passkey" });
+    if (!user?.passkey?.publicKey) {
+      return res.status(404).json({ error: "no verified passkey for this credential — register again" });
+    }
+    try {
+      const { signCount } = await verifyAssertion(
+        authenticatorData,
+        clientDataJSON,
+        signature,
+        user.passkey.publicKey,
+        user.passkey.signCount ?? 0,
+        user.passkey.rpId ?? SECURITY.rpId,
+        SECURITY.origins,
+      );
+      store.updateUser(user.id, { passkey: { ...user.passkey, signCount } });
+    } catch (err: any) {
+      return res.status(401).json({ error: String(err?.message ?? err) });
+    }
     const balanceEur = await vaultBalance(user.address).catch(() => 0);
     res.json({ ...withSession(user), balanceEur });
   }),
@@ -185,6 +267,9 @@ app.post(
 app.post(
   "/api/simulate/sepa-deposit",
   wrap(async (req, res) => {
+    if (!SECURITY.allowSimulation) {
+      return res.status(403).json({ error: "simulation endpoints are disabled in production" });
+    }
     if (sandbox) {
       return res.status(400).json({
         error:
@@ -322,6 +407,9 @@ app.post(
 app.post(
   "/api/simulate/pickup",
   wrap(async (req, res) => {
+    if (!SECURITY.allowSimulation) {
+      return res.status(403).json({ error: "simulation endpoints are disabled in production" });
+    }
     const t = store.findTransfer(req.body?.transferId);
     if (!t) return res.status(404).json({ error: "transfer not found" });
     if (!requireUserSession(req, res, t.userId)) return;

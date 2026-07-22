@@ -81,6 +81,27 @@ export const STELLAR = {
 
 export const anchorModeEnabled = () => Boolean(STELLAR.anchorDomain);
 
+/** FP1/FP2 security posture (red-team fixes). */
+export const SECURITY = {
+  /** Simulation endpoints (mock SEPA deposit, pickup) are dev-only unless
+   *  explicitly re-enabled. */
+  allowSimulation:
+    process.env.ALLOW_SIMULATION === "1" || process.env.NODE_ENV !== "production",
+  /** When a real rail (anchor / Monerium sandbox) fails, fall back to a
+   *  simulated payout only if explicitly allowed — otherwise fail closed. */
+  allowMockFallback: process.env.ALLOW_MOCK_FALLBACK === "1",
+  /** WebAuthn relying-party id + origins allowed for ceremonies and for
+   *  cross-origin state-changing requests. */
+  rpId: process.env.RP_ID ?? "localhost",
+  origins: (
+    process.env.WEBAUTHN_ORIGINS ??
+    `http://localhost:${process.env.TRANSF_API_PORT ?? 3000},http://127.0.0.1:${process.env.TRANSF_API_PORT ?? 3000}`
+  ).split(",").map((s) => s.trim()).filter(Boolean),
+  /** Simple per-IP rate limits (requests per minute). */
+  rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 300),
+  authRateLimitPerMin: Number(process.env.AUTH_RATE_LIMIT_PER_MIN ?? 20),
+};
+
 // Hardhat's well-known dev accounts. On testnet/mainnet these come from a KMS.
 export const KEYS = {
   deployer: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",

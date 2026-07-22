@@ -17,9 +17,16 @@ export interface User {
    *  ownership declaration and UserOperations. Production: KMS/passkeys. */
   privateKey?: `0x${string}`;
   wallet?: { type: "candide-safe"; deployed: boolean; deployOpHash?: string };
-  /** WebAuthn credential bound to this account. Auth credential today,
-   *  Safe co-owner in the passkey-custody upgrade. */
-  passkey?: { credentialId: string; attestation?: string; createdAt: string };
+  /** WebAuthn credential bound to this account. Public key + counter are
+   *  stored from a verified registration; login verifies assertions. */
+  passkey?: {
+    credentialId: string;
+    publicKey?: { jwk: JsonWebKey; alg: "ES256" | "RS256" };
+    signCount?: number;
+    rpId?: string;
+    attestation?: string;
+    createdAt: string;
+  };
   /** mock: IBAN issued locally. sandbox states track Monerium provisioning. */
   funding?: {
     mode: "mock" | "sandbox";
