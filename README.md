@@ -1,8 +1,9 @@
-![transF](assets/readme-banner.png)
+![Zoll](assets/readme-banner.png)
 
-# transF
+# Zoll
 
-A remittance app that settles on stablecoin rails.
+A remittance app that settles on stablecoin rails. Built by **Zoldenburg**,
+the cross-border payments infrastructure underneath it. 🦄
 
 Money comes in by SEPA transfer to a per-user IBAN and lands on-chain as
 e-money. It sits in a vault contract owned by the user's smart account. It

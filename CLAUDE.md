@@ -1,4 +1,16 @@
-# transF — notes for Claude sessions
+# Zoll — notes for Claude sessions
+
+## Naming (decided July 2026)
+- **Zoldenburg** = the company / infra brand (B2B, legal, footer). Old-Swiss-
+  bank gravitas.
+- **Zoll** = the consumer app name (short, corridor-speakable; also German for
+  "customs/toll" — the fee at a border, apt for cross-border money).
+- **Narwhal** = mascot (favicon + empty states). No narwhal emoji exists; UI
+  uses 🦄 as stand-in.
+- Repo dir on disk is still `transF` (do NOT rewrite absolute paths in
+  .claude/launch.json). GitHub repo rename to `zoll`/`zoldenburg` is pending
+  (redirects old URLs; cheap). Code/docs/package name already say Zoll.
+- TODO before public: domain + trademark clearance for "Zoll" in fintech.
 
 ## Environment
 - Node lives in-project (machine has no system Node):
@@ -27,7 +39,7 @@
   recipient AND destinationCaller must be the CctpForwarder.
 
 ## Current state (July 2026)
-- Repo: github.com/tonyzil/transF (private). PR #1 open:
+- Repo: github.com/tonyzil/Zoll (private). PR #1 open:
   feat/passkey-onboarding-destination-send (passkey onboarding wizard,
   destination-first send flow, README rewrite).
 - Working: three payout rails (KES cash / SEPA / UPI), Candide Safe

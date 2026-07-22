@@ -360,7 +360,7 @@ export async function executeSepaTransfer(transfer: Transfer, user: User): Promi
 
     if (moneriumSandboxEnabled()) {
       try {
-        const order = await redeemToIban(user, payoutEur, counterpart, `transF ${transfer.id}`);
+        const order = await redeemToIban(user, payoutEur, counterpart, `Zoll ${transfer.id}`);
         return store.updateTransfer(transfer.id, {
           state: "PAYOUT_SUBMITTED",
           sepa: {
