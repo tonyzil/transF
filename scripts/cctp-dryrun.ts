@@ -28,6 +28,7 @@ console.log(`4. mint      -> ${plan.stellarMint.contract} :: ${plan.stellarMint.
 if (plan.burnTxHash) {
   console.log(`\nburn tx: ${plan.burnTxHash}`);
   console.log(`attestation: ${plan.attestation ? "received ✓" : "pending"}`);
+  console.log(`stellar mint: ${plan.stellarMintTxHash ?? "not submitted"}`);
 } else {
   console.log(
     "\n(dry-run — no funds moved. To go live: fund an EOA with Base Sepolia ETH + " +

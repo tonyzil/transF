@@ -92,6 +92,7 @@ function recordCctpPlan(txs: Transfer["txs"], plan: CctpPlan) {
   if (plan.burnTxHash) txs.push({ step: "cctp.burn", hash: plan.burnTxHash });
   if (plan.attestation) txs.push({ step: "cctp.attestation", hash: plan.attestation.message.slice(0, 66) });
   txs.push({ step: "cctp.mint.prepared", hash: plan.stellarMint.contract });
+  if (plan.stellarMintTxHash) txs.push({ step: "cctp.mint_and_forward", hash: plan.stellarMintTxHash });
 }
 
 function cashPayoutState(pickup: NonNullable<Transfer["pickup"]>): TransferState {

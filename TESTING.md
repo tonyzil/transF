@@ -82,10 +82,12 @@ MoneyGram requires client-domain attribution.
 
 ```sh
 npm run cctp:dryrun      # prints the exact burn/attest/mint plan, moves nothing
+npm run cctp:readiness   # validates live CCTP env + balances, moves nothing
 ```
 
 To execute for real: fund an EOA with Base Sepolia ETH (any faucet) + testnet
-USDC (<https://faucet.circle.com>), set `CCTP_BURNER_KEY` + `CCTP_LIVE=1`.
+USDC (<https://faucet.circle.com>), set `CCTP_BURNER_KEY`,
+`STELLAR_TREASURY_SECRET`, and `CCTP_LIVE=1`.
 
 ## Known limitations (by design, MVP)
 
