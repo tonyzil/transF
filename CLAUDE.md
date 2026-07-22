@@ -45,9 +45,12 @@
 - Working: three payout rails (KES cash / SEPA / UPI), Candide Safe
   wallets deployed gasless with EIP-1271 Monerium linking, live anchor
   payouts, e2e green across all rails.
-- Known TODOs marked in code: passkey assertion-signature verification
-  (server.ts), Monerium webhook signature verification, per-transfer FX
-  hedging.
+- Known TODOs marked in code: Monerium webhook signature verification
+  (POST /api/webhooks/monerium is UNAUTHENTICATED and mints vault credit
+  from the request body — worst open hole, fix before anything hosted),
+  per-transfer FX hedging. (Stale item removed: passkey assertion
+  verification shipped with FP2 — webauthn.ts does full server-side
+  verification.)
 
 ## Security gate (red-team, July 2026 — fix before any hosted/public demo)
 Sessions+authz landed (PR #2). FP1+FP2 DONE (July 2026): simulate endpoints
@@ -61,14 +64,26 @@ FP3 DONE (July 2026): failures auto-compensate (escrow release + vault
 re-credit at current rates, itemized deductions, REFUNDED state), startup +
 5-min sweep recovers stranded transfers; FORCE_FAIL_STEP test hook,
 npm run fp3:test.
-FP4 (key custody — passkey-as-Safe-owner; no plaintext keys): DESIGN, needs
-a real-browser session (WebAuthn ceremonies don't resolve in the embedded
-pane). Plan: use Candide `SafeAccountV0_3_0` + WebAuthn module (fromSafe-
-Webauthn) so the passkey COSE key is a Safe owner; deploy the WebAuthn
-signer/verifier; sign the Monerium ownership declaration + UserOps via the
-passkey (P-256, EIP-1271) instead of the server EOA; drop `user.privateKey`.
-Keep a KMS/session-key fallback for the orchestrator's own txs. We already
-store the COSE pubkey from FP2 registration — that's the owner key.
+FP4 (key custody): SPEND-AUTHORITY HALF DONE (July 2026, PR #11, branch
+claude/fp4-vault-authorization — do not re-do differently). RemitVault.debit
+now requires an EIP-712 PaymentAuthorization signed by the account's
+registered authorizer; the orchestrator role only submits and pays gas. The
+authorizer key is generated in the browser (localStorage, vendored
+@noble/secp256k1 + keccak in services/api/public/vendor/, import-map wired),
+registered via POST /api/users/:id/authorizer (trust-on-first-use by the
+ramp; only the current authorizer can rotate). Send flow is propose ->
+sign-in-page -> POST /api/transfers/:id/authorize. Verified live: sandbox
+onboarding bound the browser key on-chain; wrong-key signature rejected by
+the contract itself. authorizerOf ALSO accepts EIP-1271 — this is the hook
+for the passkey half below; build against it, not around it.
+FP4 still open (key-custody half): `user.privateKey` remains in db.json —
+Monerium linking + redeem still sign server-side. The plan stands: Candide
+WebAuthn Safe owner (fromSafeWebauthn) signs the Monerium declaration +
+orders via the passkey, then the passkey-owned Safe replaces the browser
+EOA as the vault authorizer (no contract change needed). Also open: the
+send-time passkey prompt is a confirmation ceremony only — the device key
+is not PRF-wrapped; and this half needs a real-browser session (WebAuthn
+never resolves in the embedded pane).
 FP5 (contract governance + quote binding): PARTIAL. Quote↔execution binding
 DONE (services/api/src/orchestrator.ts assertQuoteRateBinding: refuses +
 auto-refunds if on-chain rate drifts > FX.QUOTE_BINDING_BPS from the quote's
