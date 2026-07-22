@@ -1,4 +1,16 @@
-# transF — notes for Claude sessions
+# Zoll — notes for Claude sessions
+
+## Naming (decided July 2026)
+- **Zoldenburg** = the company / infra brand (B2B, legal, footer). Old-Swiss-
+  bank gravitas.
+- **Zoll** = the consumer app name (short, corridor-speakable; also German for
+  "customs/toll" — the fee at a border, apt for cross-border money).
+- **Narwhal** = mascot (favicon + empty states). No narwhal emoji exists; UI
+  uses 🦄 as stand-in.
+- Repo dir on disk is still `transF` (do NOT rewrite absolute paths in
+  .claude/launch.json). GitHub repo rename to `zoll`/`zoldenburg` is pending
+  (redirects old URLs; cheap). Code/docs/package name already say Zoll.
+- TODO before public: domain + trademark clearance for "Zoll" in fintech.
 
 ## Environment
 - Node lives in-project (machine has no system Node):
@@ -27,7 +39,7 @@
   recipient AND destinationCaller must be the CctpForwarder.
 
 ## Current state (July 2026)
-- Repo: github.com/tonyzil/transF (private). PR #1 open:
+- Repo: github.com/tonyzil/Zoll (private). PR #1 open:
   feat/passkey-onboarding-destination-send (passkey onboarding wizard,
   destination-first send flow, README rewrite).
 - Working: three payout rails (KES cash / SEPA / UPI), Candide Safe
@@ -72,7 +84,11 @@ payout finality until FP1-FP4 done.
    crypto→EURe conversion. Constraints learned: ~2% top-up fee, €25 exit
    fee, low-KYC tier caps; SEPA Instant is EU-mandated since Oct 2025 so
    the "24h" is their internal crediting, not the rail.
-3. Base Sepolia deployment of contracts (kill the local-chain asterisk).
+3. Public-chain deployment — decision leans POLYGON over Base: EURe is
+   native there (kills the mirror-seam), CCTP live (domain 7), Candide
+   covers it (and founders are user's friends — also ask them about
+   WebAuthn Safe owners for FP4). Monerium sandbox chain name = `amoy` (VERIFIED; other aliases rejected).
+   Safes keep the same address cross-chain.
 4. Passkey-as-Safe-owner (true non-custodial; today passkey is auth only).
 Parked deliberately: NEAR Intents (future multi-chain deposits), Metastable
 (EURe↔EURC later), Flexa/AMP (no — wrong market, card program beats it).

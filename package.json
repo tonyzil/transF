@@ -1,8 +1,8 @@
 {
-  "name": "transf",
+  "name": "zoll",
   "version": "0.1.0",
   "private": true,
-  "description": "On-chain remittance platform \u2014 Phase 0 corridor MVP (EUR in via IBAN, cash pickup out)",
+  "description": "Zoldenburg \u2014 cross-border remittance infrastructure (Zoll app: stablecoin in, local payout rails out)",
   "type": "module",
   "scripts": {
     "dev": "tsx scripts/dev.ts",
