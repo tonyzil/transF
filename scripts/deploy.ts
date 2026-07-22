@@ -12,6 +12,10 @@ import { hardhat } from "viem/chains";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RPC_URL = process.env.TRANSF_RPC_URL ?? "http://127.0.0.1:8545";
 
+if (!/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?($|\/)/.test(RPC_URL) && process.env.ALLOW_DEV_KEYS_ON_EXTERNAL_RPC !== "1") {
+  throw new Error("refusing to deploy hardhat development keys to a non-local RPC");
+}
+
 const KEYS = {
   deployer: "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
   orchestrator: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
@@ -67,6 +71,7 @@ async function main() {
 
   await call(vault, "RemitVault", "setRamp", [rampAddr, true]);
   await call(vault, "RemitVault", "setOrchestrator", [orchestratorAddr, true]);
+  await call(swapper, "FxSwapper", "setTrader", [orchestratorAddr, true]);
   await call(bridge, "BridgeEscrow", "setOrchestrator", [orchestratorAddr, true]);
   await call(usdc, "MockToken", "mint", [swapper, SWAP_INVENTORY_USDC]);
 

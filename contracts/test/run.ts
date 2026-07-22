@@ -103,6 +103,7 @@ async function main() {
   const bridge = await deploy("BridgeEscrow", [usdc.address]);
   await write("deployer", vault, "setRamp", [rampAddr, true]);
   await write("deployer", vault, "setOrchestrator", [orchAddr, true]);
+  await write("deployer", swapper, "setTrader", [orchAddr, true]);
   await write("deployer", bridge, "setOrchestrator", [orchAddr, true]);
   await write("deployer", usdc, "mint", [swapper.address, U("1000000")]);
 
@@ -182,6 +183,24 @@ async function main() {
     await write("orch", eure, "approve", [swapper.address, E("100")]);
     await write("orch", swapper, "swapExactIn", [E("100"), U("108"), orchAddr]);
     assert.equal(await read(usdc, "balanceOf", [orchAddr]), U("108"));
+  });
+
+  await t("non-trader cannot swap inventory", () =>
+    expectRevert(
+      write("ramp", swapper, "swapExactIn", [E("1"), U("1"), rampAddr]),
+      "not trader",
+      "public swapper access",
+    ),
+  );
+
+  await t("pause blocks swaps", async () => {
+    await write("deployer", swapper, "setPaused", [true]);
+    await expectRevert(
+      write("orch", swapper, "swapExactIn", [E("1"), U("1"), orchAddr]),
+      "paused",
+      "swap while paused",
+    );
+    await write("deployer", swapper, "setPaused", [false]);
   });
 
   await t("slippage guard reverts", async () => {

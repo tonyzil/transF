@@ -403,7 +403,6 @@ export async function settlePickup(transfer: Transfer): Promise<Transfer> {
   if (transfer.state !== "PAYOUT_READY") {
     throw new Error(`transfer is ${transfer.state}, expected PAYOUT_READY`);
   }
-  const pickup = completePickup(transfer.id);
   const settleHash = await writeAndWait(orchestratorWallet, {
     address: addrs().bridge,
     abi: abis.BridgeEscrow,
@@ -411,6 +410,7 @@ export async function settlePickup(transfer: Transfer): Promise<Transfer> {
     args: [transferIdHash(transfer.id)],
   });
   const txs = [...transfer.txs, { step: "bridge.settle", hash: settleHash }];
+  const pickup = completePickup(transfer.id);
   const stored = pickup ?? transfer.pickup!;
   return store.updateTransfer(transfer.id, {
     state: "PAID",

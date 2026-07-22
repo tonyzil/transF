@@ -62,7 +62,7 @@ You need Node 22 or newer. Nothing else.
 ```sh
 npm install
 npm run compile        # build the contracts
-npm run test:contracts # 15 tests against a throwaway chain
+npm run test:contracts # 17 tests against a throwaway chain
 npm run e2e            # one script: deposit, then all three payout rails
 npm run dev            # chain + contracts + API + UI on localhost:3000
 ```
@@ -107,7 +107,8 @@ is that MoneyGram, the UPI partner, and the USD side do the same.
 
 Contracts are deliberately small. `RemitVault` holds per-user balances with
 a daily cap, idempotent deposit references, and idempotent transfer IDs.
-`FxSwapper` swaps at an owner-set rate behind a slippage guard.
+`FxSwapper` swaps at an owner-set rate behind a slippage guard, restricted
+to approved executors and pausable by the owner.
 `BridgeEscrow` locks funds for the bridge leg, prevents completed transfer
 IDs from being reused, and can refund only to the target bound at lock time.
 No inheritance forest, no proxy patterns — they're

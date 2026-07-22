@@ -14,16 +14,30 @@ contract FxSwapper {
     IERC20 public immutable tokenIn; // EURe (18 decimals)
     IERC20 public immutable tokenOut; // USDC (6 decimals)
     address public owner;
+    bool public paused;
+    mapping(address => bool) public isTrader;
 
     /// tokenOut units (6dp) per 1e18 units of tokenIn.
     /// e.g. rate = 1_080_000 means 1 EURe -> 1.08 USDC.
     uint256 public rate;
 
     event RateSet(uint256 rate);
+    event TraderSet(address indexed trader, bool enabled);
+    event PausedSet(bool paused);
     event Swapped(address indexed caller, uint256 amountIn, uint256 amountOut, address indexed to);
 
     modifier onlyOwner() {
         require(msg.sender == owner, "not owner");
+        _;
+    }
+
+    modifier onlyTrader() {
+        require(isTrader[msg.sender], "not trader");
+        _;
+    }
+
+    modifier notPaused() {
+        require(!paused, "paused");
         _;
     }
 
@@ -40,13 +54,28 @@ contract FxSwapper {
         emit RateSet(_rate);
     }
 
+    function setTrader(address who, bool enabled) external onlyOwner {
+        isTrader[who] = enabled;
+        emit TraderSet(who, enabled);
+    }
+
+    function setPaused(bool value) external onlyOwner {
+        paused = value;
+        emit PausedSet(value);
+    }
+
     function quoteOut(uint256 amountIn) public view returns (uint256) {
         return (amountIn * rate) / 1e18;
     }
 
     /// Pulls `amountIn` of tokenIn from the caller, pays out tokenOut to `to`.
     /// Reverts if the output is below `minOut` (slippage guard).
-    function swapExactIn(uint256 amountIn, uint256 minOut, address to) external returns (uint256 amountOut) {
+    function swapExactIn(uint256 amountIn, uint256 minOut, address to)
+        external
+        onlyTrader
+        notPaused
+        returns (uint256 amountOut)
+    {
         amountOut = quoteOut(amountIn);
         require(amountOut >= minOut, "slippage");
         require(tokenOut.balanceOf(address(this)) >= amountOut, "no inventory");

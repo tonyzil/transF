@@ -15,6 +15,8 @@ try {
 export const RPC_URL = process.env.TRANSF_RPC_URL ?? "http://127.0.0.1:8545";
 export const API_PORT = Number(process.env.TRANSF_API_PORT ?? 3000);
 
+export const USING_LOCAL_RPC = /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?($|\/)/.test(RPC_URL);
+
 /**
  * Monerium integration. Mock mode by default; sandbox mode activates when
  * client credentials are present (create an app at https://monerium.dev,
@@ -108,6 +110,10 @@ export const KEYS = {
   orchestrator: "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
   ramp: "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
 } as const;
+
+if (!USING_LOCAL_RPC && process.env.ALLOW_DEV_KEYS_ON_EXTERNAL_RPC !== "1") {
+  throw new Error("refusing to use hardhat development keys with a non-local RPC");
+}
 
 export interface Deployments {
   eure: `0x${string}`;
