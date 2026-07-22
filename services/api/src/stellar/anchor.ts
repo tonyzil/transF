@@ -323,6 +323,47 @@ function stellarAmount(amount: number): string {
   return amount.toFixed(7).replace(/0+$/, "").replace(/\.$/, "");
 }
 
+/** Stellar's smallest unit — the only difference we tolerate as rounding. */
+const STROOP = 1e-7;
+
+/**
+ * Decide what to actually pay the anchor.
+ *
+ * The anchor echoes `amount_in` once the session firms up, and it is tempting
+ * to just send that. But it is a remote-supplied number driving an outbound
+ * payment, and we already validated `requested` against the anchor's own
+ * published limits — so an `amount_in` that disagrees is a disagreement to
+ * surface, not to silently honour. We never send more than we intended to.
+ */
+export function resolvePaymentAmount(requested: number, amountIn?: string): number {
+  if (!(requested > 0)) throw new Error("payment amount must be positive");
+  if (amountIn === undefined || amountIn === null || amountIn === "") return requested;
+  const echoed = Number(amountIn);
+  if (!Number.isFinite(echoed) || echoed <= 0) {
+    throw new Error(`anchor reported an unusable amount_in (${amountIn})`);
+  }
+  if (echoed > requested + STROOP) {
+    throw new Error(
+      `anchor asked for ${echoed} but the withdrawal was opened for ${requested} — ` +
+        `refusing to send more than we authorised`,
+    );
+  }
+  // Anchor asking for less (fees taken on their side) is theirs to decide.
+  return echoed;
+}
+
+/**
+ * Thrown when a payment may or may not have reached the network — a submit
+ * that timed out, or a Horizon response we could not interpret. The caller
+ * must NOT auto-refund on this: the money may be gone.
+ */
+export class AnchorPaymentUncertainError extends Error {
+  constructor(message: string, readonly cause?: unknown) {
+    super(message);
+    this.name = "AnchorPaymentUncertainError";
+  }
+}
+
 export interface Sep24PaymentResult {
   hash: string;
   destination: string;
@@ -347,7 +388,9 @@ export async function sendSep24WithdrawalPayment(
   const server = new Horizon.Server(STELLAR.horizon);
   const account = await server.loadAccount(source.publicKey());
   const asset = await stellarAssetForAnchor(homeDomain, assetCode);
-  const paymentAmount = status.amountIn ?? stellarAmount(amount);
+  // Never send more than the withdrawal we opened and validated against the
+  // anchor's published limits, whatever amount_in says.
+  const paymentAmount = stellarAmount(resolvePaymentAmount(amount, status.amountIn));
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
     networkPassphrase: STELLAR.networkPassphrase || Networks.TESTNET,
@@ -363,7 +406,26 @@ export async function sendSep24WithdrawalPayment(
     .setTimeout(300)
     .build();
   tx.sign(source);
-  const submitted = await server.submitTransaction(tx);
+
+  // Everything above this line is safe to retry: nothing has been broadcast.
+  // Past it, a failure is ambiguous — a timeout can still land on-ledger — so
+  // the error type tells the caller not to refund on the assumption it didn't.
+  let submitted;
+  try {
+    submitted = await server.submitTransaction(tx);
+  } catch (err: any) {
+    throw new AnchorPaymentUncertainError(
+      `Stellar payment to ${status.withdrawAnchorAccount} may or may not have landed: ${
+        err?.message ?? err
+      }`,
+      err,
+    );
+  }
+  if (!submitted?.hash) {
+    throw new AnchorPaymentUncertainError(
+      `Stellar payment to ${status.withdrawAnchorAccount} returned no transaction hash`,
+    );
+  }
   return {
     hash: submitted.hash,
     destination: status.withdrawAnchorAccount,
