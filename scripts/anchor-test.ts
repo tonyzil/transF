@@ -11,10 +11,12 @@
  * Run: npm run anchor:test
  */
 import assert from "node:assert/strict";
+import { Keypair, Networks, WebAuth } from "@stellar/stellar-sdk";
 import { STELLAR } from "../services/api/src/config.js";
 import {
   getTreasury,
   sep10Auth,
+  validateSep10Challenge,
   sep24GetTransaction,
   sep24InitiateWithdraw,
   sendSep24WithdrawalPayment,
@@ -39,6 +41,37 @@ const jwt = await sep10Auth(domain, treasury);
 console.log("SEP-10:");
 await t("auth returns a JWT", async () => {
   assert.ok(jwt.split(".").length === 3, "expected a JWT");
+});
+
+await t("challenge validation rejects the wrong home domain", async () => {
+  const server = Keypair.random();
+  const client = Keypair.random();
+  const challenge = WebAuth.buildChallengeTx(
+    server,
+    client.publicKey(),
+    domain,
+    300,
+    Networks.TESTNET,
+    domain,
+    "123",
+  );
+  assert.throws(
+    () =>
+      validateSep10Challenge(
+        challenge,
+        server.publicKey(),
+        Networks.TESTNET,
+        "evil.example",
+        `https://${domain}/auth`,
+        client.publicKey(),
+        "123",
+      ),
+    /homeDomains|home domain/,
+  );
+});
+
+await t("custodial auth refuses a non-integer memo", async () => {
+  await assert.rejects(() => sep10Auth(domain, treasury, { memo: "user-123" }), /positive integer/);
 });
 
 await t("a second auth is served from cache, not a new round trip", async () => {
