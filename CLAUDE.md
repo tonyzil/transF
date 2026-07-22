@@ -37,6 +37,22 @@
   (server.ts), Monerium webhook signature verification, per-transfer FX
   hedging.
 
+## Security gate (red-team, July 2026 — fix before any hosted/public demo)
+Sessions+authz landed (PR #2). FP1+FP2 DONE (July 2026): simulate endpoints
+403 in production (ALLOW_SIMULATION=1 to override), mock fallback fail-closed
+unless ALLOW_MOCK_FALLBACK=1, origin allowlist (WEBAUTHN_ORIGINS/RP_ID) +
+per-IP rate limits, and full server-side WebAuthn: challenge endpoint, CBOR
+attestation parsing -> COSE key stored, assertion signature+rpIdHash+counter
+verified before sessions (services/api/src/webauthn.ts, selftest script
+npm run webauthn:selftest). Still open, in fix order:
+FP3: automated failure compensation (resumable orchestrator, auto
+BridgeEscrow.release + vault refund).
+FP4: key custody — passkey-as-Safe-owner or KMS; no plaintext keys.
+FP5 (with Base deploy): multisig/timelock on contracts, tiered caps;
+quote↔execution binding via Bebop executable quotes.
+Launch gate: local demos fine; NOT safe hosted, with real funds, or claiming
+payout finality until FP1-FP4 done.
+
 ## Roadmap (agreed priority)
 0. Payout partners secured (July 2026): **dLocal** (crypto product:
    stablecoin-funded payouts, 60+ markets — UPI/India, M-Pesa/Kenya, PIX/

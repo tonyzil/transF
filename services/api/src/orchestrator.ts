@@ -30,7 +30,7 @@ import {
   completePickup,
   getPickup,
 } from "./adapters/moneygram.js";
-import { anchorModeEnabled } from "./config.js";
+import { anchorModeEnabled, SECURITY } from "./config.js";
 import { creditVpa } from "./adapters/upi.js";
 
 const MAX_SLIPPAGE_BPS = 30n;
@@ -112,7 +112,15 @@ export async function executeTransfer(transfer: Transfer, user: User): Promise<T
           transfer.recipientPhone ?? "",
         );
       } catch (err: any) {
-        console.error(`anchor pickup failed, falling back to mock: ${err?.message ?? err}`);
+        // Fail closed: a failed real payout must not masquerade as success.
+        if (!SECURITY.allowMockFallback) {
+          return store.updateTransfer(transfer.id, {
+            state: "FAILED",
+            error: `anchor payout failed: ${String(err?.message ?? err).slice(0, 200)} (set ALLOW_MOCK_FALLBACK=1 to simulate instead)`,
+            txs,
+          });
+        }
+        console.error(`anchor pickup failed, mock fallback allowed: ${err?.message ?? err}`);
       }
     }
     pickup ??= createCashPickup(
@@ -252,6 +260,14 @@ export async function executeSepaTransfer(transfer: Transfer, user: User): Promi
           },
         });
       } catch (err: any) {
+        // Fail closed unless simulation fallback is explicitly allowed.
+        if (!SECURITY.allowMockFallback) {
+          return store.updateTransfer(transfer.id, {
+            state: "FAILED",
+            error: `redeem order failed: ${String(err?.message ?? err).slice(0, 200)} (set ALLOW_MOCK_FALLBACK=1 to simulate instead)`,
+            txs,
+          });
+        }
         return store.updateTransfer(transfer.id, {
           state: "PAID",
           sepa: {
