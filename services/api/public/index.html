@@ -527,13 +527,18 @@
 <script>
 const $ = (id) => document.getElementById(id);
 let user = null, quote = null, transfer = null, poll = null;
+let sessionToken = localStorage.getItem("transf-session") || null;
 
 const fmt = (n, dp = 2) => Number(n).toLocaleString("en", { minimumFractionDigits: dp, maximumFractionDigits: dp });
 
 async function api(path, body) {
-  const res = await fetch(path, body
-    ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
-    : undefined);
+  const headers = {};
+  if (body) headers["content-type"] = "application/json";
+  if (sessionToken) headers.authorization = `Bearer ${sessionToken}`;
+  const res = await fetch(path, {
+    ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
+    headers,
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
@@ -543,6 +548,10 @@ const clearErr = (id) => $(id).classList.add("hidden");
 
 /* ---------- account ---------- */
 function renderUser(u) {
+  if (u.sessionToken) {
+    sessionToken = u.sessionToken;
+    localStorage.setItem("transf-session", sessionToken);
+  }
   user = u;
   $("balance").innerHTML = `<span class="cur">€</span>${fmt(u.balanceEur ?? 0)}`;
   $("address").textContent = u.address;

@@ -89,10 +89,19 @@ export interface Transfer {
   updatedAt: string;
 }
 
+export interface Session {
+  id: string;
+  userId: string;
+  tokenHash: string;
+  createdAt: string;
+  lastUsedAt: string;
+}
+
 interface Db {
   users: User[];
   quotes: Quote[];
   transfers: Transfer[];
+  sessions: Session[];
   /** Monerium issue-order ids already mirrored into the vault. */
   processedMoneriumOrders: string[];
 }
@@ -100,12 +109,13 @@ interface Db {
 const DATA_DIR = path.join(ROOT, "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
 
-let db: Db = { users: [], quotes: [], transfers: [], processedMoneriumOrders: [] };
+let db: Db = { users: [], quotes: [], transfers: [], sessions: [], processedMoneriumOrders: [] };
 
 export function initStore() {
   mkdirSync(DATA_DIR, { recursive: true });
   if (existsSync(DB_PATH)) {
     db = JSON.parse(readFileSync(DB_PATH, "utf8"));
+    db.sessions ??= [];
     db.processedMoneriumOrders ??= [];
   } else {
     persist();
@@ -127,6 +137,9 @@ export const store = {
   },
   get transfers() {
     return db.transfers;
+  },
+  get sessions() {
+    return db.sessions;
   },
   addUser(u: User) {
     db.users.push(u);
@@ -166,6 +179,20 @@ export const store = {
     Object.assign(t, patch, { updatedAt: new Date().toISOString() });
     persist();
     return t;
+  },
+  addSession(s: Session) {
+    db.sessions.push(s);
+    persist();
+  },
+  findSessionByTokenHash(tokenHash: string) {
+    return db.sessions.find((s) => s.tokenHash === tokenHash);
+  },
+  touchSession(id: string) {
+    const s = db.sessions.find((x) => x.id === id);
+    if (!s) throw new Error(`unknown session ${id}`);
+    s.lastUsedAt = new Date().toISOString();
+    persist();
+    return s;
   },
   findUser(id: string) {
     return db.users.find((u) => u.id === id);

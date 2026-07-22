@@ -1,6 +1,6 @@
 import express from "express";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { API_PORT, FX, moneriumSandboxEnabled } from "./config.js";
@@ -44,6 +44,49 @@ const sandbox = moneriumSandboxEnabled();
 
 /** Never send wallet keys to the client. */
 const publicUser = ({ privateKey, ...u }: User & { [k: string]: any }) => u;
+const withSession = (user: User) => ({ ...publicUser(user), sessionToken: issueSession(user.id) });
+
+function tokenHash(token: string) {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function issueSession(userId: string) {
+  const token = randomBytes(32).toString("base64url");
+  const now = new Date().toISOString();
+  store.addSession({ id: randomUUID(), userId, tokenHash: tokenHash(token), createdAt: now, lastUsedAt: now });
+  return token;
+}
+
+function bearerToken(req: express.Request): string | undefined {
+  const h = req.header("authorization") ?? "";
+  const m = h.match(/^Bearer\s+(.+)$/i);
+  return m?.[1];
+}
+
+function requireSession(req: express.Request, res: express.Response) {
+  const token = bearerToken(req);
+  if (!token) {
+    res.status(401).json({ error: "authorization required" });
+    return undefined;
+  }
+  const session = store.findSessionByTokenHash(tokenHash(token));
+  if (!session) {
+    res.status(401).json({ error: "invalid session" });
+    return undefined;
+  }
+  store.touchSession(session.id);
+  return session;
+}
+
+function requireUserSession(req: express.Request, res: express.Response, userId: string) {
+  const session = requireSession(req, res);
+  if (!session) return undefined;
+  if (session.userId !== userId) {
+    res.status(403).json({ error: "forbidden" });
+    return undefined;
+  }
+  return session;
+}
 
 app.post(
   "/api/users",
@@ -82,7 +125,7 @@ app.post(
         console.error(`provisioning failed for ${user.id}: ${err?.message ?? err}`),
       );
     }
-    res.status(201).json(publicUser(user));
+    res.status(201).json(withSession(user));
   }),
 );
 
@@ -91,6 +134,7 @@ app.get(
   wrap(async (req, res) => {
     let user = store.findUser(req.params.id);
     if (!user) return res.status(404).json({ error: "user not found" });
+    if (!requireUserSession(req, res, user.id)) return;
     if (sandbox && user.funding?.status === "iban_pending") {
       user = await refreshPendingIban(user);
     }
@@ -109,6 +153,7 @@ app.post(
   wrap(async (req, res) => {
     const user = store.findUser(req.params.id);
     if (!user) return res.status(404).json({ error: "user not found" });
+    if (!requireUserSession(req, res, user.id)) return;
     const { credentialId, attestation } = req.body ?? {};
     if (!credentialId || typeof credentialId !== "string") {
       return res.status(400).json({ error: "credentialId required" });
@@ -131,7 +176,7 @@ app.post(
     const user = store.findUserByCredential(credentialId);
     if (!user) return res.status(404).json({ error: "no account for this passkey" });
     const balanceEur = await vaultBalance(user.address).catch(() => 0);
-    res.json({ ...publicUser(user), balanceEur });
+    res.json({ ...withSession(user), balanceEur });
   }),
 );
 
@@ -151,6 +196,7 @@ app.post(
     if (!iban || !(amount > 0)) return res.status(400).json({ error: "iban and amountEur required" });
     const user = store.findUserByIban(iban);
     if (!user) return res.status(404).json({ error: "no account with that IBAN" });
+    if (!requireUserSession(req, res, user.id)) return;
     const ref = `sepa-${randomUUID()}`;
     const txs = await simulateSepaDeposit(user.address, amount, ref);
     const balanceEur = await vaultBalance(user.address);
@@ -164,7 +210,9 @@ app.post(
   "/api/quotes",
   wrap(async (req, res) => {
     const { userId, sendEur, receiveInr, rail = "cash" } = req.body ?? {};
-    if (!store.findUser(userId)) return res.status(404).json({ error: "user not found" });
+    const user = store.findUser(userId);
+    if (!user) return res.status(404).json({ error: "user not found" });
+    if (!requireUserSession(req, res, user.id)) return;
     if (!["cash", "sepa", "upi"].includes(rail)) {
       return res.status(400).json({ error: "rail must be cash, sepa or upi" });
     }
@@ -201,6 +249,7 @@ app.post(
     const { quoteId, recipientName, recipientPhone, recipientIban, recipientVpa } = req.body ?? {};
     const quote = store.findQuote(quoteId);
     if (!quote) return res.status(404).json({ error: "quote not found" });
+    if (!requireUserSession(req, res, quote.userId)) return;
     if (isExpired(quote)) return res.status(410).json({ error: "quote expired, request a new one" });
     if (quote.rail === "upi") {
       if (!recipientVpa || !isValidVpa(recipientVpa)) {
@@ -255,6 +304,7 @@ app.get(
   wrap(async (req, res) => {
     const t = store.findTransfer(req.params.id);
     if (!t) return res.status(404).json({ error: "transfer not found" });
+    if (!requireUserSession(req, res, t.userId)) return;
     res.json(t);
   }),
 );
@@ -274,6 +324,7 @@ app.post(
   wrap(async (req, res) => {
     const t = store.findTransfer(req.body?.transferId);
     if (!t) return res.status(404).json({ error: "transfer not found" });
+    if (!requireUserSession(req, res, t.userId)) return;
     res.json(await settlePickup(t));
   }),
 );

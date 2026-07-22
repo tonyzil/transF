@@ -12,8 +12,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const API = "http://127.0.0.1:3000";
+const API_PORT = Number(process.env.TRANSF_API_PORT ?? 3000);
+const RPC_URL = process.env.TRANSF_RPC_URL ?? "http://127.0.0.1:8545";
+const RPC_PORT = new URL(RPC_URL).port || "8545";
+const API = `http://127.0.0.1:${API_PORT}`;
 const bin = (name: string) => path.join(ROOT, "node_modules/.bin", name);
+let sessionToken = "";
 
 const children: ChildProcess[] = [];
 function spawnBg(cmd: string, args: string[]) {
@@ -45,18 +49,49 @@ async function waitFor(url: string, timeoutMs = 30_000) {
   throw new Error(`timeout waiting for ${url}`);
 }
 
+async function waitForRpc(url: string, timeoutMs = 30_000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
+      });
+      if (res.ok) return;
+    } catch {}
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error(`timeout waiting for ${url}`);
+}
+
 async function api(pathname: string, body?: any) {
-  const res = await fetch(API + pathname, body
-    ? { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
-    : undefined);
+  const headers: Record<string, string> = {};
+  if (body) headers["content-type"] = "application/json";
+  if (sessionToken) headers.authorization = `Bearer ${sessionToken}`;
+  const res = await fetch(API + pathname, {
+    ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
+    headers,
+  });
   const data = await res.json();
   if (!res.ok) throw new Error(`${pathname}: ${data.error ?? res.statusText}`);
   return data;
 }
 
+async function expectApiStatus(pathname: string, status: number, body?: any) {
+  const headers: Record<string, string> = {};
+  if (body) headers["content-type"] = "application/json";
+  if (sessionToken) headers.authorization = `Bearer ${sessionToken}`;
+  const res = await fetch(API + pathname, {
+    ...(body ? { method: "POST", body: JSON.stringify(body) } : {}),
+    headers,
+  });
+  assert.equal(res.status, status, `${pathname} should return ${status}`);
+}
+
 // Fail fast if another stack is already bound to our ports — otherwise the
 // spawns fail silently and the test talks to the wrong server.
-for (const [name, url] of [["api :3000", `${API}/api/health`], ["chain :8545", "http://127.0.0.1:8545"]] as const) {
+for (const [name, url] of [[`api :${API_PORT}`, `${API}/api/health`], [`chain :${RPC_PORT}`, RPC_URL]] as const) {
   const busy = await fetch(url, { signal: AbortSignal.timeout(1500) }).then(() => true).catch(() => false);
   if (busy) {
     console.error(`${name} is already in use (is 'npm run dev' running?) — stop it and re-run e2e.`);
@@ -66,16 +101,8 @@ for (const [name, url] of [["api :3000", `${API}/api/health`], ["chain :8545", "
 
 try {
   console.log("1/7 starting local chain…");
-  spawnBg(process.execPath, [bin("hardhat"), "node", "--port", "8545"]);
-  await waitFor("http://127.0.0.1:8545", 30_000).catch(async () => {
-    // hardhat's RPC 404s GET; probe with a POST instead
-    const res = await fetch("http://127.0.0.1:8545", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_blockNumber", params: [] }),
-    });
-    if (!res.ok) throw new Error("chain did not come up");
-  });
+  spawnBg(process.execPath, [bin("hardhat"), "node", "--port", RPC_PORT]);
+  await waitForRpc(RPC_URL);
 
   console.log("2/7 deploying contracts…");
   const dep = spawnSync(process.execPath, [bin("tsx"), "scripts/deploy.ts"], { cwd: ROOT, stdio: "inherit" });
@@ -88,7 +115,18 @@ try {
 
   console.log("4/7 creating user + SEPA deposit of €250…");
   const user = await api("/api/users", { name: "E2E Tester", country: "DE" });
+  assert.ok(user.sessionToken, "account creation returns a session token");
+  sessionToken = user.sessionToken;
   assert.match(user.iban, /^IS14/);
+  const userSession = sessionToken;
+  sessionToken = "";
+  await expectApiStatus(`/api/users/${user.id}`, 401);
+  await expectApiStatus("/api/quotes", 401, { userId: user.id, sendEur: 25 });
+  const other = await api("/api/users", { name: "Other User", country: "DE" });
+  sessionToken = other.sessionToken;
+  await expectApiStatus(`/api/users/${user.id}`, 403);
+  await expectApiStatus("/api/quotes", 403, { userId: user.id, sendEur: 25 });
+  sessionToken = userSession;
   const depRes = await api("/api/simulate/sepa-deposit", { iban: user.iban, amountEur: 250 });
   assert.equal(depRes.balanceEur, 250);
 
