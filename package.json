@@ -16,7 +16,9 @@
     "cctp:dryrun": "tsx scripts/cctp-dryrun.ts",
     "e2e": "tsx scripts/e2e.ts",
     "webauthn:selftest": "tsx scripts/webauthn-selftest.ts",
-    "fp3:test": "tsx scripts/fp3-test.ts"
+    "fp3:test": "tsx scripts/fp3-test.ts",
+    "audit:deps": "npm audit",
+    "check": "npm run compile && npm run test:contracts && npm run webauthn:selftest && npm run fp3:test && npm run e2e"
   },
   "devDependencies": {
     "hardhat": "^2.26.0",

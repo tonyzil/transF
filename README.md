@@ -67,6 +67,10 @@ npm run e2e            # one script: deposit, then all three payout rails
 npm run dev            # chain + contracts + API + UI on localhost:3000
 ```
 
+The API binds to `127.0.0.1` by default. Set `TRANSF_API_HOST` only for a
+deliberate remote demo; mock mutation endpoints stay disabled on non-local
+hosts unless `ALLOW_SIMULATION=1` is also set.
+
 [TESTING.md](TESTING.md) is a step-by-step walkthrough, including the
 sandbox setups. The short version:
 
@@ -119,6 +123,8 @@ meant to be read in one sitting.
 - `npm run dev` resets the local chain and the demo users each start.
 - Quotes lock a rate for ten minutes; nothing hedges the exposure.
 - Webhook signature verification (Monerium) is also a marked TODO.
+- The default Hardhat keys are refused on non-local RPC URLs unless
+  `ALLOW_DEV_KEYS_ON_EXTERNAL_RPC=1` is explicitly set.
 
 None of these are surprises buried in the code; they're all flagged where
 they live.

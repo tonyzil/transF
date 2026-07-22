@@ -13,6 +13,7 @@ npm run compile
 ```sh
 npm run test:contracts   # 17 Solidity tests: vault caps/roles/replay, FX access/slippage, escrow
 npm run e2e              # full corridor 3x: cash pickup, SEPA exit, UPI scan-and-pay
+npm run audit:deps       # npm advisory scan
 ```
 
 Both must end green (`17 tests passed`, `E2E PASSED`). The e2e boots its own

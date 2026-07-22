@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { API_PORT, FX, moneriumSandboxEnabled, SECURITY } from "./config.js";
+import { API_HOST, API_PORT, FX, moneriumSandboxEnabled, SECURITY } from "./config.js";
 import { issueChallenge, verifyAssertion, verifyRegistration } from "./webauthn.js";
 import { initStore, store, type User } from "./store.js";
 import { createQuote, isExpired } from "./fx.js";
@@ -456,6 +456,6 @@ if (sandbox) {
 } else {
   console.log("monerium: mock mode (set MONERIUM_CLIENT_ID/SECRET in .env for sandbox)");
 }
-app.listen(API_PORT, () => {
-  console.log(`transF API listening on http://127.0.0.1:${API_PORT}`);
+app.listen(API_PORT, API_HOST, () => {
+  console.log(`transF API listening on http://${API_HOST}:${API_PORT}`);
 });
