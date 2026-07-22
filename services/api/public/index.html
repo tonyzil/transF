@@ -711,22 +711,43 @@ async function registerPasskey(u) {
       pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
       authenticatorSelection: { residentKey: "preferred", userVerification: "preferred" },
       timeout: 60000,
+      // FP4: ask for the PRF extension so this passkey can encrypt the
+      // device spending key. Authenticators without it still register fine.
+      extensions: { prf: {} },
     },
   });
-  await api(`/api/users/${u.id}/passkey`, {
+  const updated = await api(`/api/users/${u.id}/passkey`, {
     credentialId: cred.id,
     attestation: b64url(cred.response.attestationObject),
     clientDataJSON: b64url(cred.response.clientDataJSON),
   });
+  // Keep the credential id locally — unwrapping the device key needs it.
+  user = { ...user, passkey: updated.passkey };
+  if (!cred.getClientExtensionResults?.().prf?.enabled) {
+    console.warn("this authenticator reports no PRF support — the device key cannot be passkey-encrypted");
+  }
 }
 
 /* FP4: bind this browser's device key as the account's payment authorizer.
    The vault takes the first binding and refuses re-binding by anyone but the
    device itself, so this can establish but never steal. */
+/* The passkey credential this browser wraps the device key with. */
+const credId = () => user?.passkey?.credentialId || null;
+
+/* FP4: mint the device key and bind it as the account's payment authorizer.
+   Runs after passkey registration so the key can be wrapped with the
+   authenticator's PRF secret; the vault takes the first binding and refuses
+   re-binding by anyone but the device, so this establishes, never steals. */
 async function registerDeviceKey(u) {
   const dev = await deviceLib;
-  const updated = await api(`/api/users/${u.id}/authorizer`, { address: dev.deviceAddress() });
+  const { address, protection } = dev.keyStatus().present
+    ? { address: await dev.deviceAddress(credId()), protection: dev.keyStatus().protection }
+    : await dev.createKey(credId());
+  const updated = await api(`/api/users/${u.id}/authorizer`, { address });
   if (updated.authorizerAddress) user = { ...user, authorizerAddress: updated.authorizerAddress };
+  if (protection !== "prf") {
+    console.warn("device key stored unprotected — this authenticator has no PRF support");
+  }
   return updated;
 }
 
@@ -737,12 +758,6 @@ async function createAccount(withPasskey) {
     u.balanceEur = 0;
     user = u;
     renderUser(u);
-    try {
-      await registerDeviceKey(u);
-    } catch (e) {
-      // Non-fatal at onboarding — sending will retry and explain.
-      console.warn("device key registration deferred:", e.message);
-    }
     if (withPasskey) {
       try {
         // Hard stop: some environments leave the WebAuthn ceremony pending
@@ -757,6 +772,13 @@ async function createAccount(withPasskey) {
         showErr("pk-err", new Error(`passkey setup didn't complete (${e.message}) — continuing without it; you can add one later`));
         await new Promise((r) => setTimeout(r, 1600));
       }
+    }
+    // After the passkey, so the spending key can be locked behind it.
+    try {
+      await registerDeviceKey(u);
+    } catch (e) {
+      // Non-fatal at onboarding — sending will retry and explain.
+      console.warn("device key registration deferred:", e.message);
     }
     enterProvisioning(pendingInfo.name);
   } catch (e) { showErr("pk-err", e); }
@@ -1072,29 +1094,6 @@ async function pollSepaTransfer(id) {
   setTimeout(() => pollSepaTransfer(id), 5000);
 }
 
-/* FP4: user-presence gesture before signing when a passkey is registered.
-   Stated openly: the device key is not yet passkey-wrapped (PRF TODO), so
-   this is a confirmation ceremony, not the cryptographic control — the
-   control is the signature the vault verifies. Embedded browser panes never
-   resolve WebAuthn, so on timeout we proceed rather than strand the user. */
-async function passkeyConfirm() {
-  if (!user.passkey || !window.PublicKeyCredential) return;
-  try {
-    await Promise.race([
-      navigator.credentials.get({
-        publicKey: {
-          challenge: crypto.getRandomValues(new Uint8Array(32)),
-          userVerification: "preferred",
-          timeout: 12000,
-        },
-      }),
-      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000)),
-    ]);
-  } catch {
-    console.warn("passkey confirmation unavailable — proceeding on device signature alone");
-  }
-}
-
 $("btn-send").onclick = async () => {
   clearErr("send-err");
   $("btn-send").disabled = true;
@@ -1113,14 +1112,15 @@ $("btn-send").onclick = async () => {
       recipientVpa: upiTarget.vpa,
     });
 
-    // 2. Authorize: sign the exact terms with this browser's device key.
+    // 2. Authorize: unlock the device key with the passkey and sign the exact
+    //    terms. With a PRF-capable authenticator the ceremony IS the gate —
+    //    the stored key is ciphertext until Face ID / fingerprint unwraps it.
     const dev = await deviceLib;
-    const addr = dev.deviceAddress();
+    const addr = await dev.deviceAddress(credId());
     if (created.authorization.authorizer.toLowerCase() !== addr.toLowerCase()) {
       throw new Error("this account's spending key was registered in a different browser — sign in there, or rotate the key from that device");
     }
-    await passkeyConfirm();
-    const signature = await dev.signTypedData(created.authorization.typedData);
+    const signature = await dev.signTypedData(created.authorization.typedData, credId());
 
     // 3. Submit: the server can only carry this signature to the vault.
     const t = await api(`/api/transfers/${created.id}/authorize`, { signature });
