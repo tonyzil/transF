@@ -75,6 +75,18 @@ payout finality until FP1-FP4 done.
 Parked deliberately: NEAR Intents (future multi-chain deposits), Metastable
 (EURe↔EURC later), Flexa/AMP (no — wrong market, card program beats it).
 
+## Multi-agent workflow (two agents work this repo)
+Claude (local sessions) and OpenClaw (friend's agent) both commit here. The
+PR #3 merge silently dropped a pushed commit because both touched the same
+branch (stale head at merge time; recovered in PR #4). Rules:
+- Branch prefixes: `claude/*` for Claude sessions, OpenClaw uses its own
+  branches. NEVER push to a branch the other agent created.
+- main is PR-merge only. Before merging any PR, confirm its head SHA equals
+  the commit you last pushed; after merging, verify the content actually
+  landed (grep the tree, don't trust "merged: true").
+- Start every session with git fetch; expect main to have moved.
+- OpenClaw's token expires soon (July 2026) — its activity may stop.
+
 ## Style
 - User wants prose without AI-marketing jargon (see README voice: what's
   real vs simulated, specifics over adjectives, shortcuts stated openly).
