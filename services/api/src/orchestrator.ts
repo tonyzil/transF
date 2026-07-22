@@ -258,12 +258,15 @@ export async function executeTransfer(
     let pickup;
     if (anchorModeEnabled()) {
       try {
-        pickup = await createCashPickupViaAnchor(
-          transfer.id,
-          transfer.receiveKes,
-          transfer.recipientName,
-          transfer.recipientPhone ?? "",
-        );
+        // The anchor withdraws USDC and does its own FX to cash at the
+        // counter — passing the KES figure here would ask it for ~130x the
+        // value. usdcOut is what the bridge leg actually holds.
+        pickup = await createCashPickupViaAnchor(transfer.id, {
+          amountAsset: transfer.usdcOut ?? usd.fromUnits(expectedOut),
+          payoutKes: transfer.receiveKes,
+          recipientName: transfer.recipientName,
+          recipientPhone: transfer.recipientPhone ?? "",
+        });
       } catch (err: any) {
         // Fail closed: a failed real payout must not masquerade as success.
         if (!SECURITY.allowMockFallback) {
@@ -289,6 +292,10 @@ export async function executeTransfer(
         provider: pickup.provider,
         status: pickup.status,
         interactiveUrl: pickup.interactiveUrl,
+        anchorTransactionId: pickup.anchorTransactionId,
+        anchorAmount: pickup.anchorAmount,
+        anchorAsset: pickup.anchorAsset,
+        anchorStatus: pickup.anchorStatus,
       },
     });
   } catch (err: any) {

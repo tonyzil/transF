@@ -94,6 +94,21 @@ const t = async (label: string, fn: () => Promise<void>) => {
   console.log(`  ok  ${label}`);
 };
 
+// Fail fast if another stack holds our ports — otherwise the spawns fail
+// silently (stdio: "ignore") and the test talks to a stale server, which
+// looks like a product bug instead of a leaked process.
+for (const [name, url] of [
+  [`api :${API_PORT}`, `${API}/api/health`],
+  [`chain :${RPC_PORT}`, RPC_URL],
+  [`stub :${STUB_PORT}`, `http://127.0.0.1:${STUB_PORT}/orders`],
+] as const) {
+  const busy = await fetch(url, { signal: AbortSignal.timeout(1500) }).then(() => true).catch(() => false);
+  if (busy) {
+    console.error(`${name} is already in use — stop it (or a leftover test) and re-run.`);
+    process.exit(1);
+  }
+}
+
 try {
   await new Promise<void>((r) => stub.listen(STUB_PORT, r));
 
