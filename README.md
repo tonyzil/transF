@@ -42,7 +42,9 @@ Running this repo with sandbox credentials, today:
   (`MG_CLIENT_DOMAIN` + `MG_CLIENT_DOMAIN_SIGNING_SECRET`).
 - **Bridge**: a CCTP v2 worker is wired against the real Base Sepolia
   contracts and Circle's attestation API for the Base → Stellar leg.
-  It runs in dry-run mode until you fund a burner key from the faucets.
+  It runs in dry-run mode until `npm run cctp:readiness` sees a funded Base
+  Sepolia burner and Stellar treasury, then `CCTP_LIVE=1` submits burn,
+  attestation polling, and Stellar `mint_and_forward`.
 - **Passkeys**: onboarding registers a WebAuthn credential and returning
   users sign in with it.
 

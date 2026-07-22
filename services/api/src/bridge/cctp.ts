@@ -11,16 +11,21 @@
  *      message, mints USDC (scaled 6dp -> 7dp), forwards to the recipient.
  *
  * Dry-run by default: builds the exact calldata/plan without sending.
- * CCTP_LIVE=1 + CCTP_BURNER_KEY (funded with Base Sepolia ETH + USDC from
- * faucet.circle.com) executes leg 1-2 for real. Leg 3 requires a Soroban
- * invocation which we surface as a prepared call; wiring full Soroban
- * submission is gated on live testing.
+ * faucet.circle.com) executes burn, attestation polling, and Stellar
+ * mint_and_forward for real.
  */
 import { createPublicClient, createWalletClient, encodeFunctionData, http, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { baseSepolia } from "viem/chains";
-import { StrKey } from "@stellar/stellar-sdk";
-import { CCTP } from "../config.js";
+import {
+  Contract,
+  Keypair,
+  rpc,
+  StrKey,
+  TransactionBuilder,
+  xdr,
+} from "@stellar/stellar-sdk";
+import { CCTP, STELLAR } from "../config.js";
 
 const TOKEN_MESSENGER_ABI = [
   {
@@ -85,6 +90,7 @@ export interface CctpPlan {
   approveTxHash?: `0x${string}`;
   burnTxHash?: `0x${string}`;
   attestation?: { message: string; attestation: string };
+  stellarMintTxHash?: string;
 }
 
 export class CctpBridgeError extends Error {
@@ -138,6 +144,7 @@ export async function bridgeUsdcToStellar(
 
   if (plan.mode !== "live") return plan;
   if (!CCTP.burnerKey) throw new Error("CCTP_LIVE=1 requires CCTP_BURNER_KEY");
+  if (!STELLAR.treasurySecret) throw new Error("CCTP_LIVE=1 requires STELLAR_TREASURY_SECRET to submit mint_and_forward");
 
   // ---- live execution (legs 1 + 2) ----
   const account = privateKeyToAccount(CCTP.burnerKey as `0x${string}`);
@@ -155,10 +162,59 @@ export async function bridgeUsdcToStellar(
 
   try {
     plan.attestation = await pollIris(burnHash);
+    plan.stellarMintTxHash = await mintCctpToStellar(plan.attestation, (hash) => {
+      plan.stellarMintTxHash = hash;
+    });
   } catch (err: any) {
     throw new CctpBridgeError(err?.message ?? String(err), plan);
   }
   return plan;
+}
+
+function hexBytes(value: string): xdr.ScVal {
+  const hex = value.startsWith("0x") ? value.slice(2) : value;
+  return xdr.ScVal.scvBytes(Buffer.from(hex, "hex"));
+}
+
+/**
+ * Complete the Stellar side of a Base -> Stellar CCTP transfer. Circle's
+ * Stellar forwarder takes the raw CCTP message and Iris attestation bytes.
+ */
+export async function mintCctpToStellar(
+  attestation: { message: string; attestation: string },
+  onSubmitted?: (hash: string) => void,
+): Promise<string> {
+  if (!STELLAR.treasurySecret) throw new Error("STELLAR_TREASURY_SECRET required for Stellar CCTP mint");
+  const signer = Keypair.fromSecret(STELLAR.treasurySecret);
+  const server = new rpc.Server(STELLAR.sorobanRpc);
+  const account = await server.getAccount(signer.publicKey());
+  const contract = new Contract(CCTP.stellarForwarder);
+  const tx = new TransactionBuilder(account, {
+    fee: "10000000",
+    networkPassphrase: STELLAR.networkPassphrase,
+  })
+    .addOperation(contract.call("mint_and_forward", hexBytes(attestation.message), hexBytes(attestation.attestation)))
+    .setTimeout(120)
+    .build();
+
+  const simulated = await server.simulateTransaction(tx);
+  if (rpc.Api.isSimulationError(simulated)) {
+    throw new Error(`CCTP Stellar mint simulation failed: ${JSON.stringify(simulated)}`);
+  }
+  const prepared = rpc.assembleTransaction(tx, simulated).build();
+  prepared.sign(signer);
+
+  const sent = await server.sendTransaction(prepared);
+  if (sent.status === "ERROR") throw new Error(`CCTP Stellar mint send failed: ${JSON.stringify(sent)}`);
+  onSubmitted?.(sent.hash);
+
+  let result = await server.getTransaction(sent.hash);
+  while (result.status === "NOT_FOUND") {
+    await new Promise((resolve) => setTimeout(resolve, 2_000));
+    result = await server.getTransaction(sent.hash);
+  }
+  if (result.status !== "SUCCESS") throw new Error(`CCTP Stellar mint failed: ${JSON.stringify(result)}`);
+  return sent.hash;
 }
 
 /** Poll Iris (sandbox) until the attestation for a burn tx is complete. */
