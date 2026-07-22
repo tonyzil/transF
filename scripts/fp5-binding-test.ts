@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { createPublicClient, createWalletClient, http } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
+import { newDevice, registerDevice, sendTransfer } from "./device.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const RPC = "http://127.0.0.1:8548";
@@ -51,6 +52,8 @@ try {
   const user = await api("/api/users", { name: "Binding Tester", country: "DE" });
   token = user.sessionToken;
   await api("/api/simulate/sepa-deposit", { iban: user.iban, amountEur: 250 });
+  const device = newDevice();
+  await registerDevice(api, user.id, device);
   const quote = await api("/api/quotes", { userId: user.id, sendEur: 100, rail: "cash" });
   assert.ok(quote.lockedSwapRate, "quote records lockedSwapRate");
 
@@ -63,7 +66,7 @@ try {
 
   console.log("4/5 executing — must refuse and refund…");
   // FP3 turns the binding failure into REFUNDED, which the route returns 201.
-  const t = await api("/api/transfers", { quoteId: quote.id, recipientName: "X", recipientPhone: "+254700000000" });
+  const t = await sendTransfer(api, device, { quoteId: quote.id, recipientName: "X", recipientPhone: "+254700000000" });
   assert.equal(t.state, "REFUNDED", `state: ${t.state} (${t.error ?? ""})`);
   assert.match(t.error ?? "", /rate moved/i, "error names the rate drift");
   assert.ok(t.txs.some((x: any) => x.step === "vault.refundCredit"), "vault refunded");
