@@ -72,6 +72,7 @@ export type TransferState =
   | "PAYOUT_READY"
   | "PAYOUT_SUBMITTED"
   | "PAID"
+  | "MANUAL_REVIEW"
   | "FAILED"
   | "REFUNDED";
 
@@ -112,6 +113,9 @@ export interface Transfer {
     anchorTransactionId?: string;
     anchorAmount?: number;
     anchorAsset?: string;
+    anchorPaymentHash?: string;
+    anchorReferenceNumber?: string;
+    moreInfoUrl?: string;
     anchorStatus?: string;
   };
   /** SEPA payout leg: a real Monerium redeem order in sandbox, or a mock. */

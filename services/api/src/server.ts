@@ -19,6 +19,7 @@ import {
   executeSepaTransfer,
   executeTransfer,
   executeUpiTransfer,
+  refreshPayout,
   settlePickup,
   sweepStrandedTransfers,
 } from "./orchestrator.js";
@@ -461,6 +462,16 @@ app.get(
     if (!t) return res.status(404).json({ error: "transfer not found" });
     if (!requireUserSession(req, res, t.userId)) return;
     res.json(t);
+  }),
+);
+
+app.post(
+  "/api/transfers/:id/refresh-payout",
+  wrap(async (req, res) => {
+    const t = store.findTransfer(req.params.id);
+    if (!t) return res.status(404).json({ error: "transfer not found" });
+    if (!requireUserSession(req, res, t.userId)) return;
+    res.json(await refreshPayout(t));
   }),
 );
 
