@@ -31,13 +31,22 @@ export function createQuote(userId: string, req: QuoteRequest): Quote {
 
   let quote: Quote;
   if (req.rail === "upi") {
-    // INR-fixed: merchant must receive exactly receiveInr; we compute the
-    // EUR the sender pays, fee on top.
-    const receiveInr = req.receiveInr ?? 0;
-    if (!(receiveInr > 0)) throw new Error("receiveInr required for upi quotes");
+    // Two quote modes: INR-fixed (merchant QR states the bill — compute the
+    // EUR the sender pays) or EUR-fixed (sender picks what to send — compute
+    // what arrives), used by the destination-first send flow.
     const mid = FX.EURUSD_MID * FX.USDINR_MID;
     const allIn = mid * (1 - FX.SPREAD_BPS / 10_000);
-    const sendEur = round(receiveInr / allIn + FX.UPI_FIXED_FEE_EUR, 2);
+    let sendEur: number;
+    let receiveInr: number;
+    if (req.receiveInr && req.receiveInr > 0) {
+      receiveInr = req.receiveInr;
+      sendEur = round(receiveInr / allIn + FX.UPI_FIXED_FEE_EUR, 2);
+    } else if (req.sendEur && req.sendEur > FX.UPI_FIXED_FEE_EUR) {
+      sendEur = req.sendEur;
+      receiveInr = round((sendEur - FX.UPI_FIXED_FEE_EUR) * allIn, 2);
+    } else {
+      throw new Error("receiveInr or sendEur required for upi quotes");
+    }
     quote = {
       ...base,
       sendEur,

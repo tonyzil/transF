@@ -5,6 +5,7 @@ import { ROOT } from "./config.js";
 export interface User {
   id: string;
   name: string;
+  email?: string;
   country: string;
   kycStatus: "approved"; // mock KYC auto-approves; real flow: Sumsub/Persona
   iban: string; // funding IBAN — mock-issued, or real from Monerium sandbox
@@ -16,6 +17,9 @@ export interface User {
    *  ownership declaration and UserOperations. Production: KMS/passkeys. */
   privateKey?: `0x${string}`;
   wallet?: { type: "candide-safe"; deployed: boolean; deployOpHash?: string };
+  /** WebAuthn credential bound to this account. Auth credential today,
+   *  Safe co-owner in the passkey-custody upgrade. */
+  passkey?: { credentialId: string; attestation?: string; createdAt: string };
   /** mock: IBAN issued locally. sandbox states track Monerium provisioning. */
   funding?: {
     mode: "mock" | "sandbox";
@@ -137,6 +141,9 @@ export const store = {
   },
   findUserByAddress(address: string) {
     return db.users.find((u) => u.address.toLowerCase() === address.toLowerCase());
+  },
+  findUserByCredential(credentialId: string) {
+    return db.users.find((u) => u.passkey?.credentialId === credentialId);
   },
   isOrderProcessed(orderId: string) {
     return db.processedMoneriumOrders.includes(orderId);
