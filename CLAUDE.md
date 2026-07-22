@@ -61,9 +61,22 @@ FP3 DONE (July 2026): failures auto-compensate (escrow release + vault
 re-credit at current rates, itemized deductions, REFUNDED state), startup +
 5-min sweep recovers stranded transfers; FORCE_FAIL_STEP test hook,
 npm run fp3:test.
-FP4: key custody — passkey-as-Safe-owner or KMS; no plaintext keys.
-FP5 (with Base deploy): multisig/timelock on contracts, tiered caps;
-quote↔execution binding via Bebop executable quotes.
+FP4 (key custody — passkey-as-Safe-owner; no plaintext keys): DESIGN, needs
+a real-browser session (WebAuthn ceremonies don't resolve in the embedded
+pane). Plan: use Candide `SafeAccountV0_3_0` + WebAuthn module (fromSafe-
+Webauthn) so the passkey COSE key is a Safe owner; deploy the WebAuthn
+signer/verifier; sign the Monerium ownership declaration + UserOps via the
+passkey (P-256, EIP-1271) instead of the server EOA; drop `user.privateKey`.
+Keep a KMS/session-key fallback for the orchestrator's own txs. We already
+store the COSE pubkey from FP2 registration — that's the owner key.
+FP5 (contract governance + quote binding): PARTIAL. Quote↔execution binding
+DONE (services/api/src/orchestrator.ts assertQuoteRateBinding: refuses +
+auto-refunds if on-chain rate drifts > FX.QUOTE_BINDING_BPS from the quote's
+lockedSwapRate; npm run fp5:test). OpenClaw PR #9 landed replay/role/pause
+hardening (idempotent deposits, escrow Status enum + refundTo binding,
+swapper onlyTrader+pause, live-chain deploy guard). Still open: multisig/
+timelock ownership, tiered/KYC-risk caps (vs global daily cap), Bebop
+executable quotes to replace the mock rate.
 Launch gate: local demos fine; NOT safe hosted, with real funds, or claiming
 payout finality until FP1-FP4 done.
 

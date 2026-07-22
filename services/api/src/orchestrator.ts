@@ -36,6 +36,29 @@ import { creditVpa } from "./adapters/upi.js";
 
 const MAX_SLIPPAGE_BPS = 30n;
 
+/**
+ * FP5: verify the live on-chain swap rate hasn't drifted past tolerance from
+ * the rate the quote assumed. Throws (→ FP3 compensation) if it has, so a
+ * transfer never settles at economics the user didn't agree to.
+ */
+async function assertQuoteRateBinding(transfer: Transfer): Promise<void> {
+  const quote = store.findQuote(transfer.quoteId);
+  if (!quote?.lockedSwapRate) return; // legacy/sepa quotes: nothing to bind
+  const locked = BigInt(quote.lockedSwapRate);
+  const live = (await publicClient.readContract({
+    address: addrs().swapper,
+    abi: abis.FxSwapper,
+    functionName: "rate",
+    args: [],
+  })) as bigint;
+  const driftBps = (live > locked ? live - locked : locked - live) * 10_000n / locked;
+  if (driftBps > BigInt(FX.QUOTE_BINDING_BPS)) {
+    throw new Error(
+      `FX rate moved since quote (${driftBps} bps > ${FX.QUOTE_BINDING_BPS} bps cap) — request a new quote`,
+    );
+  }
+}
+
 /** Test hook: FORCE_FAIL_STEP=<step> makes the orchestrator throw right
  *  after that step commits — used to exercise the compensation path. */
 const failpoint = (step: string) => {
@@ -171,6 +194,7 @@ export async function executeTransfer(transfer: Transfer, user: User): Promise<T
     // 2. Swap the convertible portion (send - fixed fee) EURe -> USDC.
     //    The fixed fee stays at the orchestrator address as revenue.
     const convertibleWei = eur.toWei(transfer.sendEur - FX.FIXED_FEE_EUR);
+    await assertQuoteRateBinding(transfer);
     const expectedOut = (await publicClient.readContract({
       address: a.swapper,
       abi: abis.FxSwapper,
@@ -287,6 +311,7 @@ export async function executeUpiTransfer(transfer: Transfer, user: User): Promis
     // Swap the convertible portion to USDC — the settlement asset we net
     // against the partner's INR float.
     const convertibleWei = eur.toWei(transfer.sendEur - FX.UPI_FIXED_FEE_EUR);
+    await assertQuoteRateBinding(transfer);
     const expectedOut = (await publicClient.readContract({
       address: a.swapper,
       abi: abis.FxSwapper,

@@ -156,4 +156,9 @@ export const FX = {
   UPI_FIXED_FEE_EUR: 0.29,
   QUOTE_TTL_MS: 10 * 60 * 1000,
   DAILY_CAP_EUR: 2500, // mirrors RemitVault.dailyCap
+  // FP5: max on-chain rate drift between quote and execution before the
+  // transfer is rejected and refunded (bps).
+  QUOTE_BINDING_BPS: 50,
+  // Swapper rate (tokenOut 6dp per 1e18 tokenIn) the quote assumes.
+  swapRate: () => Math.round(1.08 * 1e6),
 };

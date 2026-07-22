@@ -18,7 +18,8 @@
     "webauthn:selftest": "tsx scripts/webauthn-selftest.ts",
     "fp3:test": "tsx scripts/fp3-test.ts",
     "audit:deps": "npm audit",
-    "check": "npm run compile && npm run test:contracts && npm run webauthn:selftest && npm run fp3:test && npm run e2e"
+    "check": "npm run compile && npm run test:contracts && npm run webauthn:selftest && npm run fp3:test && npm run e2e",
+    "fp5:test": "tsx scripts/fp5-binding-test.ts"
   },
   "devDependencies": {
     "hardhat": "^2.26.0",
