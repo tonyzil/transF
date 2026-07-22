@@ -121,6 +121,14 @@ async function main() {
     assert.equal(await read(vault, "balanceOf", [USER]), E("1000"));
   });
 
+  await t("duplicate deposit ref reverts", () =>
+    expectRevert(
+      write("ramp", vault, "creditDeposit", [USER, E("1"), keccak256(toHex("r1"))]),
+      "duplicate deposit",
+      "replayed deposit ref",
+    ),
+  );
+
   await t("non-ramp cannot credit", () =>
     expectRevert(
       write("orch", vault, "creditDeposit", [USER, E("1"), keccak256(toHex("r2"))]),

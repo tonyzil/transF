@@ -26,6 +26,8 @@ contract RemitVault {
     mapping(address => mapping(uint256 => uint256)) public debitedOnDay;
     /// transferId => already processed (idempotency at the contract layer)
     mapping(bytes32 => bool) public processedTransfer;
+    /// deposit ref => already processed (idempotency at the contract layer)
+    mapping(bytes32 => bool) public processedDeposit;
 
     event Deposited(address indexed user, uint256 amount, bytes32 indexed ref);
     event Debited(address indexed user, uint256 amount, address indexed to, bytes32 indexed transferId);
@@ -68,6 +70,10 @@ contract RemitVault {
     /// `ref` is the off-chain payment reference (e.g. SEPA end-to-end id hash).
     function creditDeposit(address user, uint256 amount, bytes32 ref) external notPaused {
         require(isRamp[msg.sender], "not ramp");
+        require(user != address(0), "zero user");
+        require(amount > 0, "zero amount");
+        require(!processedDeposit[ref], "duplicate deposit");
+        processedDeposit[ref] = true;
         // The credited ledger total must be covered by tokens actually held.
         require(token.balanceOf(address(this)) >= totalCredited + amount, "uncovered credit");
         totalCredited += amount;
