@@ -73,6 +73,11 @@ Runs against Stellar's public test anchor — no signup. With
 create real SEP-24 withdrawals (the ticket links the anchor's interactive
 page).
 
+For production MoneyGram, confirm the partner-specific SEP-10 auth settings
+before using live credentials: `MG_AUTH_MEMO` for custodial positive-integer
+user memos, plus `MG_CLIENT_DOMAIN` and `MG_CLIENT_DOMAIN_SIGNING_SECRET` if
+MoneyGram requires client-domain attribution.
+
 ### CCTP bridge (Base Sepolia → Stellar testnet)
 
 ```sh

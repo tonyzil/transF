@@ -196,7 +196,10 @@ async function sep10Exchange(homeDomain: string, keypair: Keypair, options: Sep1
     network_passphrase?: string;
   };
 
-  const network = network_passphrase ?? STELLAR.networkPassphrase;
+  if (network_passphrase && network_passphrase !== STELLAR.networkPassphrase) {
+    throw new Error(`SEP-10 challenge network mismatch: ${network_passphrase}`);
+  }
+  const network = STELLAR.networkPassphrase;
   const tx = validateSep10Challenge(
     transaction,
     info.signingKey,

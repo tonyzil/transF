@@ -36,6 +36,10 @@ Running this repo with sandbox credentials, today:
   the same protocol MoneyGram's anchor runs — verified live against
   Stellar's public test anchor. Production MoneyGram is a config change
   plus a partnership.
+  Partner onboarding must supply the anchor domain, production asset, whether
+  custodial SEP-10 auth needs a positive integer user memo (`MG_AUTH_MEMO`),
+  and whether MoneyGram expects client-domain attribution
+  (`MG_CLIENT_DOMAIN` + `MG_CLIENT_DOMAIN_SIGNING_SECRET`).
 - **Bridge**: a CCTP v2 worker is wired against the real Base Sepolia
   contracts and Circle's attestation API for the Base → Stellar leg.
   It runs in dry-run mode until you fund a burner key from the faucets.
