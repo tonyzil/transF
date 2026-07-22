@@ -2,7 +2,7 @@
   "name": "zoll",
   "version": "0.1.0",
   "private": true,
-  "description": "Zoldenburg \u2014 cross-border remittance infrastructure (Zoll app: stablecoin in, local payout rails out)",
+  "description": "Zoldenburg — cross-border remittance infrastructure (Zoll app: stablecoin in, local payout rails out)",
   "type": "module",
   "scripts": {
     "dev": "tsx scripts/dev.ts",
@@ -33,7 +33,7 @@
     "typescript": "^5.5.0"
   },
   "dependencies": {
-    "@stellar/stellar-sdk": "^16.0.1",
+    "@stellar/stellar-sdk": "^16.1.0",
     "abstractionkit": "^0.4.0",
     "express": "^4.19.0",
     "viem": "^2.21.0"
