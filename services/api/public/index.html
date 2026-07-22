@@ -560,9 +560,22 @@
     </div>
   </section>
 
+<script type="importmap">
+{
+  "imports": {
+    "crypto": "/vendor/crypto-shim.js",
+    "@noble/hashes/crypto": "/vendor/hashes/cryptoBrowser.js"
+  }
+}
+</script>
+<script type="module" src="/device.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
 let user = null, quote = null, transfer = null, poll = null;
+
+/* FP4: the device module (ESM) loads after this classic script — hand it a
+   resolver so send-time code can await the crypto library. */
+const deviceLib = new Promise((resolve) => { window.__deviceLibReady = resolve; });
 let sessionToken = localStorage.getItem("zoll-session") || null;
 
 const fmt = (n, dp = 2) => Number(n).toLocaleString("en", { minimumFractionDigits: dp, maximumFractionDigits: dp });
@@ -707,6 +720,16 @@ async function registerPasskey(u) {
   });
 }
 
+/* FP4: bind this browser's device key as the account's payment authorizer.
+   The vault takes the first binding and refuses re-binding by anyone but the
+   device itself, so this can establish but never steal. */
+async function registerDeviceKey(u) {
+  const dev = await deviceLib;
+  const updated = await api(`/api/users/${u.id}/authorizer`, { address: dev.deviceAddress() });
+  if (updated.authorizerAddress) user = { ...user, authorizerAddress: updated.authorizerAddress };
+  return updated;
+}
+
 async function createAccount(withPasskey) {
   clearErr("pk-err");
   try {
@@ -714,6 +737,12 @@ async function createAccount(withPasskey) {
     u.balanceEur = 0;
     user = u;
     renderUser(u);
+    try {
+      await registerDeviceKey(u);
+    } catch (e) {
+      // Non-fatal at onboarding — sending will retry and explain.
+      console.warn("device key registration deferred:", e.message);
+    }
     if (withPasskey) {
       try {
         // Hard stop: some environments leave the WebAuthn ceremony pending
@@ -1043,11 +1072,38 @@ async function pollSepaTransfer(id) {
   setTimeout(() => pollSepaTransfer(id), 5000);
 }
 
+/* FP4: user-presence gesture before signing when a passkey is registered.
+   Stated openly: the device key is not yet passkey-wrapped (PRF TODO), so
+   this is a confirmation ceremony, not the cryptographic control — the
+   control is the signature the vault verifies. Embedded browser panes never
+   resolve WebAuthn, so on timeout we proceed rather than strand the user. */
+async function passkeyConfirm() {
+  if (!user.passkey || !window.PublicKeyCredential) return;
+  try {
+    await Promise.race([
+      navigator.credentials.get({
+        publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          userVerification: "preferred",
+          timeout: 12000,
+        },
+      }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000)),
+    ]);
+  } catch {
+    console.warn("passkey confirmation unavailable — proceeding on device signature alone");
+  }
+}
+
 $("btn-send").onclick = async () => {
   clearErr("send-err");
   $("btn-send").disabled = true;
   try {
-    const t = await api("/api/transfers", {
+    // Late binding for accounts that skipped registration at onboarding.
+    if (!user.authorizerAddress) await registerDeviceKey(user);
+
+    // 1. Propose: the server fixes the terms and returns them unexecuted.
+    const created = await api("/api/transfers", {
       quoteId: quote.id,
       recipientName: rail === "upi"
         ? (upiTarget.name || upiTarget.vpa)
@@ -1056,6 +1112,18 @@ $("btn-send").onclick = async () => {
       recipientIban: $("rec-iban").value.trim(),
       recipientVpa: upiTarget.vpa,
     });
+
+    // 2. Authorize: sign the exact terms with this browser's device key.
+    const dev = await deviceLib;
+    const addr = dev.deviceAddress();
+    if (created.authorization.authorizer.toLowerCase() !== addr.toLowerCase()) {
+      throw new Error("this account's spending key was registered in a different browser — sign in there, or rotate the key from that device");
+    }
+    await passkeyConfirm();
+    const signature = await dev.signTypedData(created.authorization.typedData);
+
+    // 3. Submit: the server can only carry this signature to the vault.
+    const t = await api(`/api/transfers/${created.id}/authorize`, { signature });
     transfer = t;
     if (t.state === "FAILED") throw new Error(t.error || "transfer failed");
     $("step-quote").classList.add("hidden");
