@@ -80,10 +80,15 @@ FP4 still open (key-custody half): `user.privateKey` remains in db.json —
 Monerium linking + redeem still sign server-side. The plan stands: Candide
 WebAuthn Safe owner (fromSafeWebauthn) signs the Monerium declaration +
 orders via the passkey, then the passkey-owned Safe replaces the browser
-EOA as the vault authorizer (no contract change needed). Also open: the
-send-time passkey prompt is a confirmation ceremony only — the device key
-is not PRF-wrapped; and this half needs a real-browser session (WebAuthn
-never resolves in the embedded pane).
+EOA as the vault authorizer (no contract change needed). The send-time passkey prompt is now
+the real gate: the device key is encrypted at rest with WebAuthn PRF
+(HKDF -> AES-GCM, only {iv,ct} in localStorage), so each payment needs a
+ceremony to unwrap; authenticators without PRF fall back to an unwrapped
+key labelled protection:"none". npm run fp4:test covers the envelope
+headlessly. UNVERIFIED without a real authenticator: that PRF is offered
+at all, and that it returns the SAME 32 bytes across ceremonies — if not,
+a wrapped key is unrecoverable after reload. Test that first in a real
+browser before trusting the wrap.
 FP5 (contract governance + quote binding): PARTIAL. Quote↔execution binding
 DONE (services/api/src/orchestrator.ts assertQuoteRateBinding: refuses +
 auto-refunds if on-chain rate drifts > FX.QUOTE_BINDING_BPS from the quote's
