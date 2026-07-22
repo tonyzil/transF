@@ -164,6 +164,10 @@ export async function refreshAnchorPickup(
  * send the asset to the anchor's on-ledger account and keep polling until the
  * anchor reports completion. When the anchor is still waiting for recipient
  * details, return the refreshed pending pickup without pretending it is paid.
+ *
+ * After the payment is submitted, slow/ambiguous anchor completion must not
+ * auto-compensate the sender: the anchor may still complete later. In that
+ * case callers should keep the transfer pending and retry/reconcile.
  */
 export async function fundAndRefreshAnchorPickup(
   transferId: string,
@@ -175,6 +179,7 @@ export async function fundAndRefreshAnchorPickup(
   if (!pickup?.anchorTransactionId || !pickup.anchorAmount || !pickup.anchorAsset) return pickup;
   if (pickup.anchorStatus === "completed") return pickup;
   if (pickup.anchorStatus && ["error", "expired", "refunded"].includes(pickup.anchorStatus)) {
+    if (pickup.anchorPaymentHash) return pickup;
     throw new Error(`anchor withdrawal ${pickup.anchorTransactionId} is ${pickup.anchorStatus}`);
   }
 
@@ -208,9 +213,11 @@ export async function fundAndRefreshAnchorPickup(
       return pickup;
     }
     if (["error", "expired", "refunded"].includes(status.status)) {
+      if (pickup.anchorPaymentHash) return pickup;
       throw new Error(`anchor withdrawal ${pickup.anchorTransactionId} is ${status.status}`);
     }
     await new Promise((r) => setTimeout(r, pollMs));
   }
-  throw new Error(`anchor withdrawal ${pickup.anchorTransactionId} did not complete in time`);
+  if (pickup.anchorPaymentHash) return pickup;
+  throw new Error(`anchor withdrawal ${pickup.anchorTransactionId} did not provide payment instructions in time`);
 }
