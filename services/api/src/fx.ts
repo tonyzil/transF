@@ -22,6 +22,7 @@ export function createQuote(userId: string, req: QuoteRequest): Quote {
     id: randomUUID(),
     userId,
     rail: req.rail,
+    status: "OPEN" as const,
     receiveKes: 0,
     receiveEur: 0,
     receiveInr: 0,

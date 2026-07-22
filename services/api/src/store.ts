@@ -43,6 +43,7 @@ export interface Quote {
   id: string;
   userId: string;
   rail: PayoutRail;
+  status: "OPEN" | "CONSUMED" | "EXPIRED";
   sendEur: number;
   fixedFeeEur: number;
   fxRate: number; // all-in rate after spread (EUR->KES, 1 for sepa, EUR->INR)
@@ -133,6 +134,7 @@ export function initStore() {
     db = JSON.parse(readFileSync(DB_PATH, "utf8"));
     db.sessions ??= [];
     db.processedMoneriumOrders ??= [];
+    for (const q of db.quotes) q.status ??= "OPEN";
   } else {
     persist();
   }
@@ -184,6 +186,21 @@ export const store = {
   addQuote(q: Quote) {
     db.quotes.push(q);
     persist();
+  },
+  updateQuote(id: string, patch: Partial<Quote>) {
+    const q = db.quotes.find((x) => x.id === id);
+    if (!q) throw new Error(`unknown quote ${id}`);
+    Object.assign(q, patch);
+    persist();
+    return q;
+  },
+  consumeQuote(id: string) {
+    const q = db.quotes.find((x) => x.id === id);
+    if (!q) throw new Error(`unknown quote ${id}`);
+    if ((q.status ?? "OPEN") !== "OPEN") return false;
+    q.status = "CONSUMED";
+    persist();
+    return true;
   },
   addTransfer(t: Transfer) {
     db.transfers.push(t);

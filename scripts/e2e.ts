@@ -146,6 +146,11 @@ try {
   assert.equal(transfer.state, "PAYOUT_READY", `transfer state: ${transfer.state} ${transfer.error ?? ""}`);
   assert.ok(transfer.pickup.referenceCode.length === 8, "pickup reference issued");
   assert.equal(transfer.txs.length, 5, "five on-chain txs");
+  await expectApiStatus("/api/transfers", 409, {
+    quoteId: quote.id,
+    recipientName: "Replay Receiver",
+    recipientPhone: "+254711111111",
+  });
   const after = await api(`/api/users/${user.id}`);
   assert.equal(after.balanceEur, 150, "balance reduced by send amount");
 

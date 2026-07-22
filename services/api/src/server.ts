@@ -341,7 +341,13 @@ app.post(
     const quote = store.findQuote(quoteId);
     if (!quote) return res.status(404).json({ error: "quote not found" });
     if (!requireUserSession(req, res, quote.userId)) return;
-    if (isExpired(quote)) return res.status(410).json({ error: "quote expired, request a new one" });
+    if ((quote.status ?? "OPEN") !== "OPEN") {
+      return res.status(409).json({ error: `quote already ${quote.status.toLowerCase()}` });
+    }
+    if (isExpired(quote)) {
+      store.updateQuote(quote.id, { status: "EXPIRED" });
+      return res.status(410).json({ error: "quote expired, request a new one" });
+    }
     if (quote.rail === "upi") {
       if (!recipientVpa || !isValidVpa(recipientVpa)) {
         return res.status(400).json({ error: "valid recipientVpa required (e.g. merchant@okicici)" });
@@ -379,6 +385,9 @@ app.post(
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
+    if (!store.consumeQuote(quote.id)) {
+      return res.status(409).json({ error: "quote already consumed" });
+    }
     store.addTransfer(transfer);
     const result =
       quote.rail === "sepa"

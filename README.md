@@ -106,15 +106,15 @@ graduated from mock to real without touching the orchestrator. The intent
 is that MoneyGram, the UPI partner, and the USD side do the same.
 
 Contracts are deliberately small. `RemitVault` holds per-user balances with
-a daily cap and idempotent transfer IDs. `FxSwapper` swaps at an owner-set
-rate behind a slippage guard. `BridgeEscrow` locks funds for the bridge leg
-and can refund them. No inheritance forest, no proxy patterns — they're
+a daily cap, idempotent deposit references, and idempotent transfer IDs.
+`FxSwapper` swaps at an owner-set rate behind a slippage guard.
+`BridgeEscrow` locks funds for the bridge leg, prevents completed transfer
+IDs from being reused, and can refund only to the target bound at lock time.
+No inheritance forest, no proxy patterns — they're
 meant to be read in one sitting.
 
 ## Things to know before relying on it
 
-- Passkey login matches on credential ID. Verifying the assertion
-  signature is marked TODO in `server.ts` — do not ship without it.
 - `npm run dev` resets the local chain and the demo users each start.
 - Quotes lock a rate for ten minutes; nothing hedges the exposure.
 - Webhook signature verification (Monerium) is also a marked TODO.

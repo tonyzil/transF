@@ -203,14 +203,25 @@ async function main() {
   await t("double lock reverts", () =>
     expectRevert(
       write("orch", bridge, "lockForPayout", [tid, U("1"), "stellar", "x"]),
-      "already locked",
+      "already used",
       "same transferId twice",
     ),
   );
 
-  await t("settle clears the lock", async () => {
+  await t("settle clears the lock and prevents id reuse", async () => {
+    const beforeOwner = (await read(usdc, "balanceOf", [wallets.deployer.account.address])) as bigint;
     await write("orch", bridge, "settle", [tid]);
     assert.equal(await read(bridge, "lockedAmount", [tid]), 0n);
+    assert.equal(await read(bridge, "totalLocked"), 0n);
+    const afterOwner = (await read(usdc, "balanceOf", [wallets.deployer.account.address])) as bigint;
+    assert.equal(afterOwner - beforeOwner, U("108"));
+    await write("deployer", usdc, "mint", [orchAddr, U("1")]);
+    await write("orch", usdc, "approve", [bridge.address, U("1")]);
+    await expectRevert(
+      write("orch", bridge, "lockForPayout", [tid, U("1"), "stellar", "again"]),
+      "already used",
+      "settled transferId reused",
+    );
   });
 
   await t("release refunds to target", async () => {
@@ -220,6 +231,11 @@ async function main() {
     await write("orch", usdc, "approve", [bridge.address, U("5")]);
     await write("orch", bridge, "lockForPayout", [tid2, U("5"), "stellar", "x"]);
     const before = (await read(usdc, "balanceOf", [orchAddr])) as bigint;
+    await expectRevert(
+      write("orch", bridge, "release", [tid2, USER]),
+      "wrong refund target",
+      "refund target chosen after lock",
+    );
     await write("orch", bridge, "release", [tid2, orchAddr]);
     const after = (await read(usdc, "balanceOf", [orchAddr])) as bigint;
     assert.equal(after - before, U("5"));

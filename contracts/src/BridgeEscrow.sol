@@ -16,6 +16,16 @@ contract BridgeEscrow {
     address public owner;
     mapping(address => bool) public isOrchestrator;
     mapping(bytes32 => uint256) public lockedAmount; // transferId => amount
+    mapping(bytes32 => address) public refundTo; // transferId => bound refund target
+    mapping(bytes32 => Status) public statusOf;
+    uint256 public totalLocked;
+
+    enum Status {
+        NONE,
+        LOCKED,
+        SETTLED,
+        RELEASED
+    }
 
     event BridgeOut(bytes32 indexed transferId, uint256 amount, string destChain, string destMemo);
     event Released(bytes32 indexed transferId, uint256 amount, address to);
@@ -44,26 +54,38 @@ contract BridgeEscrow {
         string calldata destChain,
         string calldata destMemo
     ) external onlyOrchestrator {
-        require(lockedAmount[transferId] == 0, "already locked");
+        require(statusOf[transferId] == Status.NONE, "already used");
         require(amount > 0, "zero amount");
         require(token.transferFrom(msg.sender, address(this), amount), "pull failed");
         lockedAmount[transferId] = amount;
+        refundTo[transferId] = msg.sender;
+        statusOf[transferId] = Status.LOCKED;
+        totalLocked += amount;
         emit BridgeOut(transferId, amount, destChain, destMemo);
     }
 
-    /// Mark a payout as settled on the far side (cash picked up).
+    /// Mark a payout as settled on the far side (cash picked up), then move
+    /// the locally locked liquidity back to the protocol treasury.
     function settle(bytes32 transferId) external onlyOrchestrator {
         uint256 amount = lockedAmount[transferId];
+        require(statusOf[transferId] == Status.LOCKED, "not locked");
         require(amount > 0, "unknown transfer");
         lockedAmount[transferId] = 0;
+        totalLocked -= amount;
+        statusOf[transferId] = Status.SETTLED;
+        require(token.transfer(owner, amount), "settle transfer failed");
         emit Settled(transferId, amount);
     }
 
     /// Refund path: payout failed or expired unclaimed.
     function release(bytes32 transferId, address to) external onlyOrchestrator {
         uint256 amount = lockedAmount[transferId];
+        require(statusOf[transferId] == Status.LOCKED, "not locked");
         require(amount > 0, "unknown transfer");
+        require(to == refundTo[transferId], "wrong refund target");
         lockedAmount[transferId] = 0;
+        totalLocked -= amount;
+        statusOf[transferId] = Status.RELEASED;
         require(token.transfer(to, amount), "refund failed");
         emit Released(transferId, amount, to);
     }
