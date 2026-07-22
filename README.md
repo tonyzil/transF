@@ -1,3 +1,5 @@
+![transF on-chain remittance banner](assets/readme-banner.png)
+
 # transF — on-chain remittance platform (Phase 0 MVP)
 
 One corridor in, two payout rails out:
