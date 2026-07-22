@@ -113,9 +113,15 @@ DONE (services/api/src/orchestrator.ts assertQuoteRateBinding: refuses +
 auto-refunds if on-chain rate drifts > FX.QUOTE_BINDING_BPS from the quote's
 lockedSwapRate; npm run fp5:test). OpenClaw PR #9 landed replay/role/pause
 hardening (idempotent deposits, escrow Status enum + refundTo binding,
-swapper onlyTrader+pause, live-chain deploy guard). Still open: multisig/
-timelock ownership, tiered/KYC-risk caps (vs global daily cap), Bebop
-executable quotes to replace the mock rate.
+swapper onlyTrader+pause, live-chain deploy guard). Multisig/timelock ownership DONE
+(July 2026, PR #26): contracts/src/AdminTimelock.sol is an M-of-N + delay
+owner of vault/swapper/escrow, so no single key can raise the daily cap,
+grant itself a role, or drain swapper inventory. Emergency pause stays
+instant via a separate guardian role (guardian can pause, only the timelock
+can un-pause). deploy.ts transfers ownership after wiring roles;
+TIMELOCK_DELAY_SECONDS / TIMELOCK_THRESHOLD configure it. Still open:
+tiered/KYC-risk caps (vs global daily cap), Bebop executable quotes to
+replace the mock rate.
 Launch gate: local demos fine; NOT safe hosted, with real funds, or claiming
 payout finality until FP1-FP4 done.
 

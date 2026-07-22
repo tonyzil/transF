@@ -132,6 +132,7 @@ if (!USING_LOCAL_RPC && process.env.ALLOW_DEV_KEYS_ON_EXTERNAL_RPC !== "1") {
 
 export interface Deployments {
   eure: `0x${string}`;
+  timelock?: `0x${string}`;
   usdc: `0x${string}`;
   vault: `0x${string}`;
   swapper: `0x${string}`;

@@ -59,6 +59,12 @@ async function call(address: `0x${string}`, name: string, functionName: string, 
 }
 
 const DAILY_CAP_EUR = parseUnits("2500", 18);
+// Governance: admin actions run through an M-of-N timelock, so no single key
+// can raise the cap, grant itself a role, or drain the swapper. Local dev uses
+// a short delay and the hardhat accounts; a real deployment sets these from
+// env and the owners are hardware/multisig keys held by different people.
+const TIMELOCK_DELAY = BigInt(process.env.TIMELOCK_DELAY_SECONDS ?? 60);
+const TIMELOCK_THRESHOLD = Number(process.env.TIMELOCK_THRESHOLD ?? 2);
 const EURUSD_RATE = 1_080_000n; // 1 EURe (1e18) -> 1.08 USDC (6dp)
 const SWAP_INVENTORY_USDC = parseUnits("1000000", 6);
 
@@ -69,15 +75,40 @@ async function main() {
   const swapper = await deploy("FxSwapper", [eure, usdc, EURUSD_RATE]);
   const bridge = await deploy("BridgeEscrow", [usdc]);
 
+  // Hardhat accounts #0/#1/#2 stand in for three separate signers.
+  const timelockOwners = [
+    deployer.account.address,
+    privateKeyToAccount(KEYS.orchestrator).address,
+    privateKeyToAccount(KEYS.ramp).address,
+  ];
+  const timelock = await deploy("AdminTimelock", [
+    timelockOwners,
+    TIMELOCK_THRESHOLD,
+    TIMELOCK_DELAY,
+  ]);
+
   await call(vault, "RemitVault", "setRamp", [rampAddr, true]);
   await call(vault, "RemitVault", "setOrchestrator", [orchestratorAddr, true]);
   await call(swapper, "FxSwapper", "setTrader", [orchestratorAddr, true]);
   await call(bridge, "BridgeEscrow", "setOrchestrator", [orchestratorAddr, true]);
   await call(usdc, "MockToken", "mint", [swapper, SWAP_INVENTORY_USDC]);
 
-  const out = { eure, usdc, vault, swapper, bridge };
+  // A guardian can halt the system instantly without waiting out the timelock.
+  await call(vault, "RemitVault", "setGuardian", [rampAddr]);
+  await call(swapper, "FxSwapper", "setGuardian", [rampAddr]);
+
+  // Roles are wired BEFORE ownership moves — afterwards every admin call has
+  // to be queued, confirmed and waited out, which is the point.
+  await call(vault, "RemitVault", "transferOwnership", [timelock]);
+  await call(swapper, "FxSwapper", "transferOwnership", [timelock]);
+  await call(bridge, "BridgeEscrow", "transferOwnership", [timelock]);
+
+  const out = { eure, usdc, vault, swapper, bridge, timelock };
   writeFileSync(path.join(ROOT, "deployments.json"), JSON.stringify(out, null, 2));
-  console.log("\nroles wired, swapper seeded with 1,000,000 USDC");
+  console.log(
+    `\nroles wired, swapper seeded with 1,000,000 USDC` +
+      `\nadmin ownership -> AdminTimelock ${timelock} (${TIMELOCK_THRESHOLD}-of-${timelockOwners.length}, ${TIMELOCK_DELAY}s delay)`,
+  );
   console.log("wrote deployments.json");
 }
 

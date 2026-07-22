@@ -56,6 +56,8 @@ contract RemitVault {
     event Deposited(address indexed user, uint256 amount, bytes32 indexed ref);
     event Debited(address indexed user, uint256 amount, address indexed to, bytes32 indexed transferId);
     event Paused(bool paused);
+    event GuardianSet(address indexed guardian);
+    event OwnershipTransferred(address indexed from, address indexed to);
     event AuthorizerSet(address indexed account, address indexed authorizer, address indexed setBy);
 
     modifier onlyOwner() {
@@ -141,6 +143,29 @@ contract RemitVault {
         if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) return false;
         address recovered = ecrecover(digest, v, r, s);
         return recovered != address(0) && recovered == signer;
+    }
+
+    /// Emergency stop. A guardian key can halt the system instantly — waiting
+    /// out a timelock while funds drain is not a policy. Restarting is the
+    /// dangerous direction and stays with the owner (the timelock).
+    address public guardian;
+
+    function setGuardian(address who) external onlyOwner {
+        guardian = who;
+        emit GuardianSet(who);
+    }
+
+    function pause() external {
+        require(msg.sender == guardian || msg.sender == owner, "not guardian");
+        paused = true;
+        emit Paused(true);
+    }
+
+    /// Hand the privileged role to a new owner — in practice the AdminTimelock.
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "zero owner");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
     }
 
     function setRamp(address who, bool enabled) external onlyOwner {

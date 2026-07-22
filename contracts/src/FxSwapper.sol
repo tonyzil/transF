@@ -24,6 +24,8 @@ contract FxSwapper {
     event RateSet(uint256 rate);
     event TraderSet(address indexed trader, bool enabled);
     event PausedSet(bool paused);
+    event GuardianSet(address indexed guardian);
+    event OwnershipTransferred(address indexed from, address indexed to);
     event Swapped(address indexed caller, uint256 amountIn, uint256 amountOut, address indexed to);
 
     modifier onlyOwner() {
@@ -46,6 +48,29 @@ contract FxSwapper {
         tokenOut = IERC20(_tokenOut);
         owner = msg.sender;
         rate = _rate;
+    }
+
+    /// Emergency stop. A guardian key can halt the system instantly — waiting
+    /// out a timelock while funds drain is not a policy. Restarting is the
+    /// dangerous direction and stays with the owner (the timelock).
+    address public guardian;
+
+    function setGuardian(address who) external onlyOwner {
+        guardian = who;
+        emit GuardianSet(who);
+    }
+
+    function pause() external {
+        require(msg.sender == guardian || msg.sender == owner, "not guardian");
+        paused = true;
+        emit PausedSet(true);
+    }
+
+    /// Hand the privileged role to a new owner — in practice the AdminTimelock.
+    function transferOwnership(address newOwner) external onlyOwner {
+        require(newOwner != address(0), "zero owner");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
     }
 
     function setRate(uint256 _rate) external onlyOwner {

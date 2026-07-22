@@ -9,7 +9,7 @@ import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPublicClient, createWalletClient, http } from "viem";
+import { createPublicClient, createWalletClient, encodeFunctionData, http, keccak256, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 import { newDevice, registerDevice, sendTransfer } from "./device.js";
@@ -43,7 +43,7 @@ try {
   bg(process.execPath, [bin("hardhat"), "node", "--port", "8548"]);
   const pub = createPublicClient({ chain: hardhat, transport: http(RPC) });
   { const s = Date.now(); while (Date.now() - s < 30_000) { try { await pub.getBlockNumber(); break; } catch { await new Promise(r => setTimeout(r, 300)); } } }
-  assert.equal(spawnSync(process.execPath, [bin("tsx"), "scripts/deploy.ts"], { cwd: ROOT, stdio: "inherit", env: ENV }).status, 0);
+  assert.equal(spawnSync(process.execPath, [bin("tsx"), "scripts/deploy.ts"], { cwd: ROOT, stdio: "inherit", env: { ...ENV, TIMELOCK_DELAY_SECONDS: "0" } }).status, 0);
   rmSync(path.join(ROOT, "data/db.json"), { force: true });
   bg(process.execPath, [bin("tsx"), "services/api/src/server.ts"]);
   { const s = Date.now(); while (Date.now() - s < 30_000) { try { if ((await fetch(`${API}/api/health`)).ok) break; } catch {} await new Promise(r => setTimeout(r, 300)); } }
@@ -57,12 +57,34 @@ try {
   const quote = await api("/api/quotes", { userId: user.id, sendEur: 100, rail: "cash" });
   assert.ok(quote.lockedSwapRate, "quote records lockedSwapRate");
 
-  console.log("3/5 moving the on-chain FX rate past tolerance…");
+  console.log("3/5 moving the on-chain FX rate past tolerance (via the timelock)…");
+  // Admin actions now go through AdminTimelock: no single key can change the
+  // rate, so this both moves the rate and exercises the governance path.
   const dep = createWalletClient({ account: privateKeyToAccount("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"), chain: hardhat, transport: http(RPC) });
-  const { swapper } = JSON.parse(readFileSync(path.join(ROOT, "deployments.json"), "utf8"));
-  const abi = [{ type: "function", name: "setRate", stateMutability: "nonpayable", inputs: [{ name: "_rate", type: "uint256" }], outputs: [] }] as const;
-  const { request } = await pub.simulateContract({ account: dep.account, address: swapper, abi, functionName: "setRate", args: [900_000n] }); // 1.08 → 0.90, ~16%
-  await pub.waitForTransactionReceipt({ hash: await dep.writeContract(request) });
+  const second = createWalletClient({ account: privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d"), chain: hardhat, transport: http(RPC) });
+  const { swapper, timelock } = JSON.parse(readFileSync(path.join(ROOT, "deployments.json"), "utf8"));
+  assert.ok(timelock, "deployments.json should record the AdminTimelock address");
+  const setRate = encodeFunctionData({
+    abi: [{ type: "function", name: "setRate", stateMutability: "nonpayable", inputs: [{ name: "_rate", type: "uint256" }], outputs: [] }] as const,
+    functionName: "setRate",
+    args: [900_000n], // 1.08 → 0.90, ~16%
+  });
+  const tlAbi = [
+    { type: "function", name: "queue", stateMutability: "nonpayable", inputs: [{ name: "target", type: "address" }, { name: "value", type: "uint256" }, { name: "data", type: "bytes" }, { name: "salt", type: "bytes32" }], outputs: [{ type: "bytes32" }] },
+    { type: "function", name: "confirm", stateMutability: "nonpayable", inputs: [{ name: "id", type: "bytes32" }], outputs: [] },
+    { type: "function", name: "execute", stateMutability: "payable", inputs: [{ name: "id", type: "bytes32" }], outputs: [{ type: "bytes" }] },
+    { type: "function", name: "operationId", stateMutability: "pure", inputs: [{ name: "target", type: "address" }, { name: "value", type: "uint256" }, { name: "data", type: "bytes" }, { name: "salt", type: "bytes32" }], outputs: [{ type: "bytes32" }] },
+  ] as const;
+  const salt = keccak256(toHex("fp5-rate-move"));
+  const opId = await pub.readContract({ address: timelock, abi: tlAbi, functionName: "operationId", args: [swapper, 0n, setRate, salt] });
+  const send = async (w: typeof dep, fn: "queue" | "confirm" | "execute", args: any[]) => {
+    const { request } = await pub.simulateContract({ account: w.account, address: timelock, abi: tlAbi, functionName: fn, args });
+    await pub.waitForTransactionReceipt({ hash: await w.writeContract(request) });
+  };
+  await send(dep, "queue", [swapper, 0n, setRate, salt]);
+  // One key is not enough — a second owner must agree.
+  await send(second, "confirm", [opId]);
+  await send(dep, "execute", [opId]);
 
   console.log("4/5 executing — must refuse and refund…");
   // FP3 turns the binding failure into REFUNDED, which the route returns 201.
