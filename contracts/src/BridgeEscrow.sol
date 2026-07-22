@@ -30,6 +30,7 @@ contract BridgeEscrow {
     event BridgeOut(bytes32 indexed transferId, uint256 amount, string destChain, string destMemo);
     event Released(bytes32 indexed transferId, uint256 amount, address to);
     event Settled(bytes32 indexed transferId, uint256 amount);
+    event OwnershipTransferred(address indexed from, address indexed to);
 
     modifier onlyOrchestrator() {
         require(isOrchestrator[msg.sender], "not orchestrator");
@@ -39,6 +40,14 @@ contract BridgeEscrow {
     constructor(address _token) {
         token = IERC20(_token);
         owner = msg.sender;
+    }
+
+    /// Hand the privileged role to a new owner — in practice the AdminTimelock.
+    function transferOwnership(address newOwner) external {
+        require(msg.sender == owner, "not owner");
+        require(newOwner != address(0), "zero owner");
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
     }
 
     function setOrchestrator(address who, bool enabled) external {

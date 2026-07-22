@@ -8,7 +8,7 @@ import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createPublicClient, createWalletClient, http, keccak256, parseUnits, toHex } from "viem";
+import { createPublicClient, createWalletClient, encodeFunctionData, http, keccak256, parseUnits, toHex } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 
@@ -27,6 +27,8 @@ const wallets = {
   orch: createWalletClient({ account: privateKeyToAccount(pk.orch), chain: hardhat, transport: http(RPC) }),
   ramp: createWalletClient({ account: privateKeyToAccount(pk.ramp), chain: hardhat, transport: http(RPC) }),
 };
+const ramp2Key = "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6" as const;
+wallets.ramp2 = createWalletClient({ account: privateKeyToAccount(ramp2Key), chain: hardhat, transport: http(RPC) });
 const orchAddr = wallets.orch.account.address;
 const rampAddr = wallets.ramp.account.address;
 // The user's device key: it authorizes debits and never exists server-side.
@@ -97,6 +99,19 @@ async function write(w: keyof typeof wallets, c: Deployed, functionName: string,
 
 async function read(c: Deployed, functionName: string, args: any[] = []) {
   return pub.readContract({ address: c.address, abi: c.abi, functionName, args });
+}
+
+async function increaseTime(seconds: number) {
+  await fetch(RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "evm_increaseTime", params: [seconds] }),
+  });
+  await fetch(RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "evm_mine", params: [] }),
+  });
 }
 
 async function expectRevert(promise: Promise<any>, needle: string, label: string) {
@@ -308,6 +323,149 @@ async function main() {
       "debit while paused",
     );
     await write("deployer", vault, "setPaused", [false]);
+  });
+
+  console.log("AdminTimelock — governance:");
+  const TL_DELAY = 60;
+  const timelock = await deploy("AdminTimelock", [
+    [wallets.deployer.account.address, orchAddr, rampAddr],
+    2,
+    BigInt(TL_DELAY),
+  ]);
+  const capCall = encodeFunctionData({
+    abi: artifact("RemitVault").abi,
+    functionName: "setDailyCap",
+    args: [E("9999")],
+  });
+  const salt = keccak256(toHex("cap-raise"));
+  let opId: `0x${string}`;
+
+  await t("ownership moves to the timelock", async () => {
+    await write("deployer", vault, "transferOwnership", [timelock.address]);
+    assert.equal(
+      String(await read(vault, "owner")).toLowerCase(),
+      timelock.address.toLowerCase(),
+    );
+  });
+
+  await t("the old owner key can no longer raise the daily cap", () =>
+    expectRevert(
+      write("deployer", vault, "setDailyCap", [E("9999")]),
+      "not owner",
+      "deployer raising the cap directly",
+    ),
+  );
+
+  await t("a non-owner cannot queue anything", () =>
+    expectRevert(
+      write("ramp2", timelock, "queue", [vault.address, 0n, capCall, salt]),
+      "not owner",
+      "stranger queuing an admin call",
+    ),
+  );
+
+  await t("queueing records the operation and the proposer's confirmation", async () => {
+    opId = (await read(timelock, "operationId", [vault.address, 0n, capCall, salt])) as `0x${string}`;
+    await write("deployer", timelock, "queue", [vault.address, 0n, capCall, salt]);
+    const op = (await read(timelock, "operations", [opId])) as any[];
+    assert.equal(op[4], 1, "proposer should count as the first confirmation");
+  });
+
+  await t("one confirmation is not enough to execute", () =>
+    expectRevert(
+      write("deployer", timelock, "execute", [opId]),
+      "not enough confirmations",
+      "executing below threshold",
+    ),
+  );
+
+  await t("a second owner confirms, but the delay still blocks it", async () => {
+    await write("orch", timelock, "confirm", [opId]);
+    await expectRevert(
+      write("deployer", timelock, "execute", [opId]),
+      "timelock not elapsed",
+      "executing before the delay",
+    );
+  });
+
+  await t("the same owner cannot confirm twice to reach threshold alone", () =>
+    expectRevert(
+      write("orch", timelock, "confirm", [opId]),
+      "already confirmed",
+      "double confirmation",
+    ),
+  );
+
+  await t("after the delay, a confirmed operation executes", async () => {
+    await increaseTime(TL_DELAY + 1);
+    await write("deployer", timelock, "execute", [opId]);
+    assert.equal(await read(vault, "dailyCap"), E("9999"));
+  });
+
+  await t("an executed operation cannot be replayed", () =>
+    expectRevert(
+      write("deployer", timelock, "execute", [opId]),
+      "operation closed",
+      "re-executing",
+    ),
+  );
+
+  await t("any single owner can cancel a queued operation", async () => {
+    const salt2 = keccak256(toHex("cap-raise-2"));
+    const id2 = (await read(timelock, "operationId", [vault.address, 0n, capCall, salt2])) as `0x${string}`;
+    await write("deployer", timelock, "queue", [vault.address, 0n, capCall, salt2]);
+    await write("ramp", timelock, "cancel", [id2]);
+    await write("orch", timelock, "confirm", [id2]).catch(() => {});
+    await increaseTime(TL_DELAY + 1);
+    await expectRevert(
+      write("deployer", timelock, "execute", [id2]),
+      "operation closed",
+      "executing a cancelled operation",
+    );
+  });
+
+  await t("the timelock's own delay cannot be changed from outside", () =>
+    expectRevert(
+      write("deployer", timelock, "setDelay", [0n]),
+      "only via timelock",
+      "bypassing the queue to shorten the delay",
+    ),
+  );
+
+  console.log("Guardian — instant stop, slow start:");
+  await t("the guardian can pause without the timelock", async () => {
+    await write("deployer", timelock, "queue", [
+      vault.address, 0n,
+      encodeFunctionData({ abi: artifact("RemitVault").abi, functionName: "setGuardian", args: [rampAddr] }),
+      keccak256(toHex("set-guardian")),
+    ]);
+    const gid = (await read(timelock, "operationId", [
+      vault.address, 0n,
+      encodeFunctionData({ abi: artifact("RemitVault").abi, functionName: "setGuardian", args: [rampAddr] }),
+      keccak256(toHex("set-guardian")),
+    ])) as `0x${string}`;
+    await write("orch", timelock, "confirm", [gid]);
+    await increaseTime(TL_DELAY + 1);
+    await write("deployer", timelock, "execute", [gid]);
+    await write("ramp", vault, "pause", []);
+    assert.equal(await read(vault, "paused"), true);
+  });
+
+  await t("the guardian cannot un-pause — that needs the timelock", async () => {
+    await expectRevert(
+      write("ramp", vault, "setPaused", [false]),
+      "not owner",
+      "guardian restarting the system",
+    );
+    const unpause = encodeFunctionData({
+      abi: artifact("RemitVault").abi, functionName: "setPaused", args: [false],
+    });
+    const uid = (await read(timelock, "operationId", [vault.address, 0n, unpause, keccak256(toHex("unpause"))])) as `0x${string}`;
+    await write("deployer", timelock, "queue", [vault.address, 0n, unpause, keccak256(toHex("unpause"))]);
+    await write("orch", timelock, "confirm", [uid]);
+    await increaseTime(TL_DELAY + 1);
+    await write("deployer", timelock, "execute", [uid]);
+    assert.equal(await read(vault, "paused"), false);
   });
 
   console.log("FxSwapper:");
