@@ -114,6 +114,8 @@ export interface Transfer {
     anchorAmount?: number;
     anchorAsset?: string;
     anchorPaymentHash?: string;
+    anchorReferenceNumber?: string;
+    moreInfoUrl?: string;
     anchorStatus?: string;
   };
   /** SEPA payout leg: a real Monerium redeem order in sandbox, or a mock. */

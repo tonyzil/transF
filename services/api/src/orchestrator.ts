@@ -336,6 +336,8 @@ export async function executeTransfer(
         anchorAmount: pickup.anchorAmount,
         anchorAsset: pickup.anchorAsset,
         anchorPaymentHash: pickup.anchorPaymentHash,
+        anchorReferenceNumber: pickup.anchorReferenceNumber,
+        moreInfoUrl: pickup.moreInfoUrl,
         anchorStatus: pickup.anchorStatus,
       },
     });

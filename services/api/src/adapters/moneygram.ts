@@ -32,6 +32,8 @@ export interface CashPickup {
   anchorAmount?: number;
   anchorAsset?: string;
   anchorPaymentHash?: string;
+  anchorReferenceNumber?: string;
+  moreInfoUrl?: string;
   /** Last status the anchor reported, when we have polled it. */
   anchorStatus?: string;
 }
@@ -155,6 +157,12 @@ export async function refreshAnchorPickup(
   const jwt = await sep10Auth(STELLAR.anchorDomain, treasury);
   const status = await sep24GetTransaction(STELLAR.anchorDomain, jwt, pickup.anchorTransactionId);
   pickup.anchorStatus = status.status;
+  if (status.amountIn) pickup.anchorAmount = Number(status.amountIn);
+  if (status.externalTransactionId) {
+    pickup.referenceCode = status.externalTransactionId;
+    pickup.anchorReferenceNumber = status.externalTransactionId;
+  }
+  if (status.moreInfoUrl) pickup.moreInfoUrl = status.moreInfoUrl;
   if (status.status === "completed") pickup.status = "PAID";
   return pickup;
 }

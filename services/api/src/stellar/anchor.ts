@@ -188,9 +188,11 @@ export async function sep24InitiateWithdraw(
 export interface Sep24Status {
   id: string;
   status: string;
+  amountIn?: string;
   withdrawAnchorAccount?: string;
   withdrawMemo?: string;
   withdrawMemoType?: string;
+  externalTransactionId?: string;
   moreInfoUrl?: string;
 }
 
@@ -208,9 +210,11 @@ export async function sep24GetTransaction(
   return {
     id: t.id,
     status: t.status,
+    amountIn: t.amount_in,
     withdrawAnchorAccount: t.withdraw_anchor_account,
     withdrawMemo: t.withdraw_memo,
     withdrawMemoType: t.withdraw_memo_type,
+    externalTransactionId: t.external_transaction_id,
     moreInfoUrl: t.more_info_url,
   };
 }
@@ -277,6 +281,7 @@ export async function sendSep24WithdrawalPayment(
   const server = new Horizon.Server(STELLAR.horizon);
   const account = await server.loadAccount(source.publicKey());
   const asset = await stellarAssetForAnchor(homeDomain, assetCode);
+  const paymentAmount = status.amountIn ?? stellarAmount(amount);
   const tx = new TransactionBuilder(account, {
     fee: BASE_FEE,
     networkPassphrase: STELLAR.networkPassphrase || Networks.TESTNET,
@@ -285,7 +290,7 @@ export async function sendSep24WithdrawalPayment(
       Operation.payment({
         destination: status.withdrawAnchorAccount,
         asset,
-        amount: stellarAmount(amount),
+        amount: paymentAmount,
       }),
     )
     .addMemo(sep24Memo(status))
@@ -299,6 +304,6 @@ export async function sendSep24WithdrawalPayment(
     memo: status.withdrawMemo,
     memoType: status.withdrawMemoType,
     assetCode,
-    amount: stellarAmount(amount),
+    amount: paymentAmount,
   };
 }
