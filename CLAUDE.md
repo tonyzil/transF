@@ -72,7 +72,11 @@ payout finality until FP1-FP4 done.
    crypto→EURe conversion. Constraints learned: ~2% top-up fee, €25 exit
    fee, low-KYC tier caps; SEPA Instant is EU-mandated since Oct 2025 so
    the "24h" is their internal crediting, not the rail.
-3. Base Sepolia deployment of contracts (kill the local-chain asterisk).
+3. Public-chain deployment — decision leans POLYGON over Base: EURe is
+   native there (kills the mirror-seam), CCTP live (domain 7), Candide
+   covers it (and founders are user's friends — also ask them about
+   WebAuthn Safe owners for FP4). Monerium sandbox chain name = `amoy` (VERIFIED; other aliases rejected).
+   Safes keep the same address cross-chain.
 4. Passkey-as-Safe-owner (true non-custodial; today passkey is auth only).
 Parked deliberately: NEAR Intents (future multi-chain deposits), Metastable
 (EURe↔EURC later), Flexa/AMP (no — wrong market, card program beats it).
