@@ -1,3 +1,5 @@
+![transF](assets/readme-banner.png)
+
 # transF
 
 A remittance app that settles on stablecoin rails.
