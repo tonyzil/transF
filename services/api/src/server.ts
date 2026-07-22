@@ -1,6 +1,6 @@
 import express from "express";
 import path from "node:path";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { API_HOST, API_PORT, FX, moneriumSandboxEnabled, SECURITY } from "./config.js";
@@ -37,7 +37,13 @@ import {
 import { smartAccountFor } from "./wallet/candide.js";
 
 const app = express();
-app.use(express.json());
+// Keep the raw body around for webhook signature checks — HMAC has to run
+// over the exact bytes sent, not a re-serialised object.
+app.use(express.json({
+  verify: (req, _res, buf) => {
+    (req as any).rawBody = buf;
+  },
+}));
 
 /** How long a device signature stays submittable (FP4). */
 const AUTH_WINDOW_SEC = 15 * 60;
@@ -528,10 +534,37 @@ app.post(
   }),
 );
 
+/**
+ * Verify the shared-secret HMAC on a Monerium webhook.
+ *
+ * Returns true when no secret is configured — the endpoint is still safe in
+ * that case because handleWebhookEvent re-reads the order from Monerium and
+ * ignores everything else in the body. Set MONERIUM_WEBHOOK_SECRET to also
+ * keep strangers from making us do the lookup.
+ *
+ * The header name and digest encoding are ours (hex HMAC-SHA256 over the raw
+ * body); confirm them against Monerium's webhook docs before relying on this
+ * in production, since we have not seen a signed delivery from them yet.
+ */
+function verifyWebhookSignature(req: express.Request): boolean {
+  const secret = SECURITY.moneriumWebhookSecret;
+  if (!secret) return true;
+  const provided = req.header("x-monerium-signature") ?? "";
+  const raw = (req as any).rawBody as Buffer | undefined;
+  if (!raw || !provided) return false;
+  const expected = createHmac("sha256", secret).update(raw).digest("hex");
+  const a = Buffer.from(expected);
+  const b = Buffer.from(provided.replace(/^sha256=/, ""));
+  return a.length === b.length && timingSafeEqual(a, b);
+}
+
 app.post(
   "/api/webhooks/monerium",
   wrap(async (req, res) => {
     if (!sandbox) return res.status(400).json({ error: "monerium sandbox not configured" });
+    if (!verifyWebhookSignature(req)) {
+      return res.status(401).json({ error: "invalid webhook signature" });
+    }
     res.json(await handleWebhookEvent(req.body));
   }),
 );
