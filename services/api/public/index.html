@@ -536,7 +536,8 @@
           <div class="pickup hidden" id="pickup-box">
             <div class="plabel">MoneyGram pickup reference</div>
             <div class="code" id="t-ref"></div>
-            <div class="pnote"><span id="p-name"></span> shows this code + ID at any agent · gets <b id="p-kes"></b></div>
+            <div class="pnote"><span id="p-note-text"></span> <b id="p-kes"></b><span id="p-links"></span></div>
+            <button class="ghost hidden" style="margin-top:.9rem" id="btn-refresh-payout">Refresh MoneyGram status</button>
             <button class="ghost" style="margin-top:.9rem" id="btn-pickup">Simulate cash pickup</button>
           </div>
           <div class="pickup hidden" id="sepa-box" style="border-color:rgba(176,109,245,.45);background:rgba(176,109,245,.06)">
@@ -993,6 +994,12 @@ const STEP_LABELS = {
   "vault.debit": ["Debiting your EUR vault", "💶"],
   "eure.approve(swapper)": ["Authorizing FX swap", "🔏"],
   "swapper.swapExactIn": ["Swapping EURe → USDC", "🔁"],
+  "cctp.dry-run.plan": ["Preparing CCTP burn", "🌉"],
+  "cctp.live.plan": ["Preparing CCTP burn", "🌉"],
+  "cctp.approve": ["Authorizing CCTP burn", "🔏"],
+  "cctp.burn": ["Burning USDC on Base", "🔥"],
+  "cctp.attestation": ["Circle attestation received", "✅"],
+  "cctp.mint.prepared": ["Preparing Stellar mint", "🪙"],
   "usdc.approve(bridge)": ["Authorizing bridge escrow", "🔏"],
   "bridge.lockForPayout": ["Locking USDC for Stellar payout", "🌉"],
   "bridge.settle": ["Escrow settled on-chain", "✅"],
@@ -1052,14 +1059,26 @@ function playTimeline(t, { onDone } = {}) {
 }
 
 function revealPickup(t) {
+  const p = t.pickup || {};
   $("pickup-box").classList.remove("hidden");
-  $("t-ref").textContent = t.pickup.referenceCode;
-  $("p-name").textContent = t.recipientName;
+  $("t-ref").textContent = p.anchorReferenceNumber || p.referenceCode || "PENDING";
   $("p-kes").textContent = `KES ${fmt(t.receiveKes)}`;
-  if (t.pickup.interactiveUrl) {
-    $("p-kes").insertAdjacentHTML("afterend",
-      ` · <a href="${t.pickup.interactiveUrl}" target="_blank" rel="noreferrer" style="color:var(--amber)">anchor page ↗</a>`);
+  let note = `${t.recipientName} shows this code + ID at any agent · gets `;
+  if (t.state === "PAYOUT_DETAILS_PENDING") note = `${t.recipientName} completes MoneyGram details before the pickup reference is issued · gets `;
+  if (t.state === "PAYOUT_FUNDING_PENDING") note = `${t.recipientName}'s details are accepted; funding is waiting for on-ledger payment · gets `;
+  if (t.state === "PAYOUT_FUNDED") note = `${t.recipientName}'s payout is funded and waiting for MoneyGram confirmation · gets `;
+  $("p-note-text").textContent = note;
+  $("p-links").innerHTML = "";
+  if (p.interactiveUrl) {
+    $("p-links").insertAdjacentHTML("beforeend",
+      ` · <a href="${p.interactiveUrl}" target="_blank" rel="noreferrer" style="color:var(--amber)">anchor page ↗</a>`);
   }
+  if (p.moreInfoUrl) {
+    $("p-links").insertAdjacentHTML("beforeend",
+      ` · <a href="${p.moreInfoUrl}" target="_blank" rel="noreferrer" style="color:var(--amber)">details ↗</a>`);
+  }
+  $("btn-refresh-payout").classList.toggle("hidden", !p.anchorTransactionId);
+  $("btn-pickup").classList.toggle("hidden", !!p.anchorTransactionId);
   $("pickup-box").scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
@@ -1150,6 +1169,23 @@ $("btn-send").onclick = async () => {
   finally { $("btn-send").disabled = false; }
 };
 
+async function refreshCashPayout() {
+  try {
+    const t = await api(`/api/transfers/${transfer.id}/refresh-payout`, {});
+    transfer = t;
+    revealPickup(t);
+    updateHistory(t);
+    if (t.state === "PAID") {
+      $("pickup-box").classList.add("hidden");
+      $("paid-box").classList.remove("hidden");
+      $("paid-note").textContent = `${t.recipientName} collected KES ${fmt(t.receiveKes)} · ref ${t.pickup.referenceCode}`;
+      $("btn-again").classList.remove("hidden");
+    }
+  } catch (e) { showErr("send-err", e); }
+}
+
+$("btn-refresh-payout").onclick = refreshCashPayout;
+
 $("btn-pickup").onclick = async () => {
   try {
     const t = await api("/api/simulate/pickup", { transferId: transfer.id });
@@ -1188,6 +1224,9 @@ function histRow(t) {
       ? `${(t.recipientIban || "").slice(0, 9)}… · €${fmt(t.receiveEur)}`
       : `ref ${t.pickup ? t.pickup.referenceCode : "—"} · KES ${fmt(t.receiveKes)}`;
   const status = paid ? "PAID" : t.state === "REFUNDED" ? "REFUNDED" : t.state === "FAILED" ? "FAILED"
+    : t.state === "PAYOUT_DETAILS_PENDING" ? "DETAILS PENDING"
+    : t.state === "PAYOUT_FUNDING_PENDING" ? "FUNDING PENDING"
+    : t.state === "PAYOUT_FUNDED" ? "FUNDED"
     : sepa ? "SEPA IN FLIGHT" : "READY FOR PICKUP";
   const color = paid ? "var(--green)" : t.state === "REFUNDED" ? "var(--muted)"
     : t.state === "FAILED" ? "var(--red)" : "var(--amber)";
