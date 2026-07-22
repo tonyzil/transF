@@ -82,8 +82,15 @@ export interface CctpPlan {
   burnTx: { to: `0x${string}`; data: `0x${string}` };
   irisPollUrl: string; // + tx hash appended once burned
   stellarMint: { contract: string; method: "mint_and_forward"; args: "message + attestation" };
+  approveTxHash?: `0x${string}`;
   burnTxHash?: `0x${string}`;
   attestation?: { message: string; attestation: string };
+}
+
+export class CctpBridgeError extends Error {
+  constructor(message: string, public readonly plan: CctpPlan) {
+    super(message);
+  }
 }
 
 /** Build the full bridge plan (and execute legs 1-2 when live). */
@@ -116,7 +123,7 @@ export async function bridgeUsdcToStellar(
   });
 
   const plan: CctpPlan = {
-    mode: CCTP.live && CCTP.burnerKey ? "live" : "dry-run",
+    mode: CCTP.live ? "live" : "dry-run",
     amountUsdc,
     recipientStellar,
     approveTx: { to: CCTP.usdc, data: approveData },
@@ -130,6 +137,7 @@ export async function bridgeUsdcToStellar(
   };
 
   if (plan.mode !== "live") return plan;
+  if (!CCTP.burnerKey) throw new Error("CCTP_LIVE=1 requires CCTP_BURNER_KEY");
 
   // ---- live execution (legs 1 + 2) ----
   const account = privateKeyToAccount(CCTP.burnerKey as `0x${string}`);
@@ -137,13 +145,19 @@ export async function bridgeUsdcToStellar(
   const pub = createPublicClient({ chain: baseSepolia, transport: http(CCTP.baseRpc) });
 
   const approveHash = await wallet.sendTransaction({ to: plan.approveTx.to, data: plan.approveTx.data });
-  await pub.waitForTransactionReceipt({ hash: approveHash });
+  const approveReceipt = await pub.waitForTransactionReceipt({ hash: approveHash });
+  if (approveReceipt.status !== "success") throw new Error("CCTP USDC approval reverted");
+  plan.approveTxHash = approveHash;
   const burnHash = await wallet.sendTransaction({ to: plan.burnTx.to, data: plan.burnTx.data });
   const receipt = await pub.waitForTransactionReceipt({ hash: burnHash });
   if (receipt.status !== "success") throw new Error("CCTP burn reverted");
   plan.burnTxHash = burnHash;
 
-  plan.attestation = await pollIris(burnHash);
+  try {
+    plan.attestation = await pollIris(burnHash);
+  } catch (err: any) {
+    throw new CctpBridgeError(err?.message ?? String(err), plan);
+  }
   return plan;
 }
 

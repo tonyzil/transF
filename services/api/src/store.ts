@@ -72,6 +72,7 @@ export type TransferState =
   | "PAYOUT_READY"
   | "PAYOUT_SUBMITTED"
   | "PAID"
+  | "MANUAL_REVIEW"
   | "FAILED"
   | "REFUNDED";
 

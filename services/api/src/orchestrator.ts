@@ -11,9 +11,11 @@
  * in the MVP.
  */
 import { FX, moneriumSandboxEnabled } from "./config.js";
+import { Keypair } from "@stellar/stellar-sdk";
 import { store, type Transfer, type User } from "./store.js";
 import { redeemToIban } from "./adapters/monerium-sandbox.js";
 import { simulateSepaDeposit } from "./adapters/monerium.js";
+import { bridgeUsdcToStellar, CctpBridgeError, type CctpPlan } from "./bridge/cctp.js";
 import {
   abis,
   addrs,
@@ -32,7 +34,7 @@ import {
   fundAndRefreshAnchorPickup,
   getPickup,
 } from "./adapters/moneygram.js";
-import { anchorModeEnabled, SECURITY } from "./config.js";
+import { anchorModeEnabled, CCTP, SECURITY, STELLAR } from "./config.js";
 import { creditVpa } from "./adapters/upi.js";
 
 const MAX_SLIPPAGE_BPS = 30n;
@@ -75,6 +77,22 @@ const failpoint = (step: string) => {
   if (process.env.FORCE_FAIL_STEP === step) throw new Error(`forced failure after ${step}`);
 };
 
+function cctpRecipientStellar(): string {
+  const explicit = process.env.CCTP_STELLAR_RECIPIENT;
+  if (explicit) return explicit;
+  if (STELLAR.treasurySecret) return Keypair.fromSecret(STELLAR.treasurySecret).publicKey();
+  if (CCTP.live) throw new Error("CCTP_LIVE=1 requires CCTP_STELLAR_RECIPIENT or STELLAR_TREASURY_SECRET");
+  return Keypair.random().publicKey();
+}
+
+function recordCctpPlan(txs: Transfer["txs"], plan: CctpPlan) {
+  txs.push({ step: `cctp.${plan.mode}.plan`, hash: plan.burnTx.data.slice(0, 66) });
+  if (plan.approveTxHash) txs.push({ step: "cctp.approve", hash: plan.approveTxHash });
+  if (plan.burnTxHash) txs.push({ step: "cctp.burn", hash: plan.burnTxHash });
+  if (plan.attestation) txs.push({ step: "cctp.attestation", hash: plan.attestation.message.slice(0, 66) });
+  txs.push({ step: "cctp.mint.prepared", hash: plan.stellarMint.contract });
+}
+
 /**
  * FP3: mark FAILED, then immediately attempt compensation. The refund the
  * user gets depends on how far the transfer got — costs already incurred
@@ -86,6 +104,13 @@ async function failAndCompensate(id: string, err: any, txs: Transfer["txs"]): Pr
     error: String(err?.shortMessage ?? err?.message ?? err),
     txs,
   });
+  if (txs.some((x) => x.step === "cctp.burn")) {
+    return store.updateTransfer(id, {
+      state: "MANUAL_REVIEW",
+      error: `${failed.error}; CCTP burn was submitted, so automatic local refund is unsafe until the burn/mint/anchor state is reconciled`,
+      txs,
+    });
+  }
   try {
     return await compensateTransfer(id);
   } catch (e: any) {
@@ -235,24 +260,38 @@ export async function executeTransfer(
     const usdcOut = usd.fromUnits(expectedOut);
     store.updateTransfer(transfer.id, { state: "SWAPPED", txs, usdcOut });
 
-    // 3. Lock USDC in the bridge escrow for the Stellar payout leg.
-    const approveBridgeHash = await writeAndWait(orchestratorWallet, {
-      address: a.usdc,
-      abi: abis.MockToken,
-      functionName: "approve",
-      args: [a.bridge, expectedOut],
-    });
-    txs.push({ step: "usdc.approve(bridge)", hash: approveBridgeHash });
+    // 3. Bridge USDC toward Stellar. In dry-run mode we record the exact CCTP
+    //    burn/mint plan and keep the local escrow leg so the no-credential demo
+    //    can still complete. With CCTP_LIVE=1, the CCTP worker submits the Base
+    //    Sepolia burn and polls Iris; failures after burn go to manual review.
+    let cctpPlan: CctpPlan;
+    try {
+      cctpPlan = await bridgeUsdcToStellar(usd.fromUnits(expectedOut), cctpRecipientStellar());
+      recordCctpPlan(txs, cctpPlan);
+    } catch (err) {
+      if (err instanceof CctpBridgeError) recordCctpPlan(txs, err.plan);
+      throw err;
+    }
 
-    const lockHash = await writeAndWait(orchestratorWallet, {
-      address: a.bridge,
-      abi: abis.BridgeEscrow,
-      functionName: "lockForPayout",
-      args: [tid, expectedOut, "stellar", `mgi:${transfer.recipientPhone}`],
-    });
-    txs.push({ step: "bridge.lockForPayout", hash: lockHash });
+    if (cctpPlan.mode !== "live") {
+      const approveBridgeHash = await writeAndWait(orchestratorWallet, {
+        address: a.usdc,
+        abi: abis.MockToken,
+        functionName: "approve",
+        args: [a.bridge, expectedOut],
+      });
+      txs.push({ step: "usdc.approve(bridge)", hash: approveBridgeHash });
+
+      const lockHash = await writeAndWait(orchestratorWallet, {
+        address: a.bridge,
+        abi: abis.BridgeEscrow,
+        functionName: "lockForPayout",
+        args: [tid, expectedOut, "stellar", `mgi:${transfer.recipientPhone}`],
+      });
+      txs.push({ step: "bridge.lockForPayout", hash: lockHash });
+    }
     store.updateTransfer(transfer.id, { state: "BRIDGED", txs });
-    failpoint("bridge.lockForPayout");
+    failpoint(cctpPlan.mode === "live" ? "cctp.burn" : "bridge.lockForPayout");
 
     // 4. Create the cash pickup at the quoted amount — a real SEP-24 anchor
     //    withdrawal when an anchor is configured, the mock otherwise.
@@ -458,13 +497,17 @@ export async function settlePickup(transfer: Transfer): Promise<Transfer> {
   if (transfer.state !== "PAYOUT_READY") {
     throw new Error(`transfer is ${transfer.state}, expected PAYOUT_READY`);
   }
-  const settleHash = await writeAndWait(orchestratorWallet, {
-    address: addrs().bridge,
-    abi: abis.BridgeEscrow,
-    functionName: "settle",
-    args: [transferIdHash(transfer.id)],
-  });
-  const txs = [...transfer.txs, { step: "bridge.settle", hash: settleHash }];
+  const txs = [...transfer.txs];
+  const steps = new Set(txs.map((x) => x.step));
+  if (steps.has("bridge.lockForPayout") && !steps.has("bridge.settle")) {
+    const settleHash = await writeAndWait(orchestratorWallet, {
+      address: addrs().bridge,
+      abi: abis.BridgeEscrow,
+      functionName: "settle",
+      args: [transferIdHash(transfer.id)],
+    });
+    txs.push({ step: "bridge.settle", hash: settleHash });
+  }
   const pickup = completePickup(transfer.id);
   const stored = pickup ?? transfer.pickup!;
   return store.updateTransfer(transfer.id, {

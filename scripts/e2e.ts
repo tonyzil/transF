@@ -180,7 +180,9 @@ try {
   });
   assert.equal(transfer.state, "PAYOUT_READY", `transfer state: ${transfer.state} ${transfer.error ?? ""}`);
   assert.ok(transfer.pickup.referenceCode.length === 8, "pickup reference issued");
-  assert.equal(transfer.txs.length, 5, "five on-chain txs");
+  assert.ok(transfer.txs.some((tx: any) => tx.step === "cctp.dry-run.plan"), "cash rail records a CCTP dry-run plan");
+  assert.ok(transfer.txs.some((tx: any) => tx.step === "cctp.mint.prepared"), "cash rail records prepared Stellar mint");
+  assert.ok(transfer.txs.some((tx: any) => tx.step === "bridge.lockForPayout"), "dry-run keeps local escrow for demo completion");
   await expectApiStatus("/api/transfers", 409, {
     quoteId: quote.id,
     recipientName: "Replay Receiver",
