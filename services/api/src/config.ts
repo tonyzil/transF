@@ -101,6 +101,10 @@ export const SECURITY = {
     process.env.WEBAUTHN_ORIGINS ??
     `http://localhost:${process.env.TRANSF_API_PORT ?? 3000},http://127.0.0.1:${process.env.TRANSF_API_PORT ?? 3000}`
   ).split(",").map((s) => s.trim()).filter(Boolean),
+  /** Shared secret for Monerium webhook deliveries. Unset = no signature
+   *  check; the receiver is still safe because it re-reads the named order
+   *  from Monerium rather than trusting the request body. */
+  moneriumWebhookSecret: process.env.MONERIUM_WEBHOOK_SECRET ?? "",
   /** Simple per-IP rate limits (requests per minute). */
   rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 300),
   authRateLimitPerMin: Number(process.env.AUTH_RATE_LIMIT_PER_MIN ?? 20),

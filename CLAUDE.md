@@ -45,12 +45,16 @@
 - Working: three payout rails (KES cash / SEPA / UPI), Candide Safe
   wallets deployed gasless with EIP-1271 Monerium linking, live anchor
   payouts, e2e green across all rails.
-- Known TODOs marked in code: Monerium webhook signature verification
-  (POST /api/webhooks/monerium is UNAUTHENTICATED and mints vault credit
-  from the request body — worst open hole, fix before anything hosted),
-  per-transfer FX hedging. (Stale item removed: passkey assertion
-  verification shipped with FP2 — webauthn.ts does full server-side
-  verification.)
+- Known TODOs marked in code: per-transfer FX hedging. (Both earlier items
+  are done: passkey assertion verification shipped with FP2, and the
+  Monerium webhook no longer trusts its request body — see below.)
+- Monerium webhook FIXED (July 2026): it used to credit whatever address
+  and amount the body stated, unauthenticated. It now reads only an order
+  id and re-reads that order from Monerium (mirrorOrderById), so a forged
+  payload buys nothing; MONERIUM_WEBHOOK_SECRET adds an HMAC gate on top
+  (hex sha256 of the raw body in x-monerium-signature — OUR scheme, still
+  needs confirming against Monerium's real webhook docs before production).
+  npm run webhook:test covers it with a stub Monerium (7 checks).
 
 ## Security gate (red-team, July 2026 — fix before any hosted/public demo)
 Sessions+authz landed (PR #2). FP1+FP2 DONE (July 2026): simulate endpoints
