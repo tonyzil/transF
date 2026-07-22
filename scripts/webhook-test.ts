@@ -30,7 +30,7 @@ const API_PORT = Number(process.env.TRANSF_API_PORT ?? 3000);
 const RPC_URL = process.env.TRANSF_RPC_URL ?? "http://127.0.0.1:8545";
 const RPC_PORT = new URL(RPC_URL).port || "8545";
 const API = `http://127.0.0.1:${API_PORT}`;
-const STUB_PORT = 8547;
+const STUB_PORT = Number(process.env.TRANSF_STUB_PORT ?? 8547);
 const SECRET = "test-webhook-secret";
 const bin = (n: string) => path.join(ROOT, "node_modules/.bin", n);
 
