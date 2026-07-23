@@ -20,6 +20,7 @@ import { bridgeUsdcToStellar, CctpBridgeError, type CctpPlan } from "./bridge/cc
 import {
   abis,
   addrs,
+  destinationCommitment,
   eur,
   usd,
   orchestratorAddress,
@@ -77,6 +78,21 @@ async function assertQuoteRateBinding(transfer: Transfer): Promise<void> {
 const failpoint = (step: string) => {
   if (process.env.FORCE_FAIL_STEP === step) throw new Error(`forced failure after ${step}`);
 };
+
+/**
+ * Recompute the destination commitment from the payout this orchestrator is
+ * about to make. It is derived from the transfer's *current* recipient, not
+ * from a value cached at signing time, so if the stored recipient was altered
+ * after the device signed, the recomputed commitment no longer matches the
+ * signature and RemitVault.debit reverts with "bad authorization".
+ */
+function transferDestination(transfer: Transfer): `0x${string}` {
+  return destinationCommitment(transfer.rail, {
+    phone: transfer.recipientPhone,
+    iban: transfer.recipientIban,
+    vpa: transfer.recipientVpa,
+  });
+}
 
 function cctpRecipientStellar(): string {
   const explicit = process.env.CCTP_STELLAR_RECIPIENT;
@@ -235,7 +251,7 @@ export async function executeTransfer(
       address: a.vault,
       abi: abis.RemitVault,
       functionName: "debit",
-      args: [user.address, sendWei, orchestratorAddress, tid, BigInt(auth.deadline), auth.signature],
+      args: [user.address, sendWei, orchestratorAddress, tid, transferDestination(transfer), BigInt(auth.deadline), auth.signature],
     });
     txs.push({ step: "vault.debit", hash: debitHash });
     store.updateTransfer(transfer.id, { state: "DEBITED", txs });
@@ -382,7 +398,7 @@ export async function executeUpiTransfer(
       address: a.vault,
       abi: abis.RemitVault,
       functionName: "debit",
-      args: [user.address, sendWei, orchestratorAddress, tid, BigInt(auth.deadline), auth.signature],
+      args: [user.address, sendWei, orchestratorAddress, tid, transferDestination(transfer), BigInt(auth.deadline), auth.signature],
     });
     txs.push({ step: "vault.debit", hash: debitHash });
     store.updateTransfer(transfer.id, { state: "DEBITED", txs });
@@ -452,7 +468,7 @@ export async function executeSepaTransfer(
       address: a.vault,
       abi: abis.RemitVault,
       functionName: "debit",
-      args: [user.address, sendWei, orchestratorAddress, tid, BigInt(auth.deadline), auth.signature],
+      args: [user.address, sendWei, orchestratorAddress, tid, transferDestination(transfer), BigInt(auth.deadline), auth.signature],
     });
     txs.push({ step: "vault.debit", hash: debitHash });
     store.updateTransfer(transfer.id, { state: "DEBITED", txs });

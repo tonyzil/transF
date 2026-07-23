@@ -47,6 +47,27 @@ const concat = (...arrs) => {
   return out;
 };
 
+/* ---------- payout destination commitment ---------- */
+
+/**
+ * Recompute the destination commitment the server folded into the terms, from
+ * the recipient the user actually entered. Signing only proceeds when this
+ * matches the server's — so a server that swapped the IBAN/VPA/phone in the
+ * signed terms is caught here, before the passkey ever unlocks the key.
+ * Must stay byte-identical to destinationCommitment() in chain.ts.
+ */
+export function destinationCommitment(rail, target) {
+  let preimage;
+  if (rail === "sepa") {
+    preimage = `sepa|iban=${(target.iban ?? "").replace(/\s/g, "").toUpperCase()}`;
+  } else if (rail === "upi") {
+    preimage = `upi|vpa=${(target.vpa ?? "").trim().toLowerCase()}`;
+  } else {
+    preimage = `cash|phone=${(target.phone ?? "").trim()}`;
+  }
+  return bytesToHex(keccak_256(new TextEncoder().encode(preimage)));
+}
+
 /* ---------- EIP-712 ---------- */
 
 /** One abi.encode word (32 bytes) for the atomic types EIP-712 needs here. */
@@ -221,5 +242,5 @@ export async function signTypedData(typedData, credentialId) {
 
 // Hand the API to the classic script, which loaded before this module.
 if (window.__deviceLibReady) {
-  window.__deviceLibReady({ createKey, deviceAddress, signTypedData, keyStatus });
+  window.__deviceLibReady({ createKey, deviceAddress, signTypedData, keyStatus, destinationCommitment });
 }

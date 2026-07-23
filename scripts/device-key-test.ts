@@ -55,6 +55,7 @@ const TYPED_DATA = {
       { name: "amount", type: "uint256" },
       { name: "to", type: "address" },
       { name: "transferId", type: "bytes32" },
+      { name: "destination", type: "bytes32" },
       { name: "deadline", type: "uint256" },
     ],
   },
@@ -64,6 +65,7 @@ const TYPED_DATA = {
     amount: "100000000000000000000",
     to: "0x2222222222222222222222222222222222222222",
     transferId: `0x${"ab".repeat(32)}`,
+    destination: `0x${"cd".repeat(32)}`,
     deadline: 1790000000,
   },
 } as const;

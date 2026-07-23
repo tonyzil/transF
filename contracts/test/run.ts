@@ -41,13 +41,24 @@ const NO_KEY_USER = "0x1111111111111111111111111111111111111111" as const;
 
 const DEADLINE = BigInt(Math.floor(Date.now() / 1000) + 3600);
 
+/** A default payout-destination commitment for the happy-path tests. */
+const DEST = keccak256(toHex("cash|phone=+254700000000"));
+
 /** Sign a PaymentAuthorization the way the browser will. */
 async function authorize(
   vaultAddress: `0x${string}`,
   account: { signTypedData: (a: any) => Promise<`0x${string}`> },
-  args: { user: `0x${string}`; amount: bigint; to: `0x${string}`; transferId: `0x${string}`; deadline?: bigint },
+  args: {
+    user: `0x${string}`;
+    amount: bigint;
+    to: `0x${string}`;
+    transferId: `0x${string}`;
+    destination?: `0x${string}`;
+    deadline?: bigint;
+  },
 ) {
   const deadline = args.deadline ?? DEADLINE;
+  const destination = args.destination ?? DEST;
   const signature = await account.signTypedData({
     domain: { name: "RemitVault", version: "1", chainId: 31337, verifyingContract: vaultAddress },
     types: {
@@ -56,6 +67,7 @@ async function authorize(
         { name: "amount", type: "uint256" },
         { name: "to", type: "address" },
         { name: "transferId", type: "bytes32" },
+        { name: "destination", type: "bytes32" },
         { name: "deadline", type: "uint256" },
       ],
     },
@@ -65,10 +77,11 @@ async function authorize(
       amount: args.amount,
       to: args.to,
       transferId: args.transferId,
+      destination,
       deadline,
     },
   });
-  return [args.user, args.amount, args.to, args.transferId, deadline, signature] as const;
+  return [args.user, args.amount, args.to, args.transferId, destination, deadline, signature] as const;
 }
 
 function artifact(name: string) {
@@ -194,7 +207,7 @@ async function main() {
   console.log("RemitVault — FP4 payment authorization:");
   await t("debit without a registered authorizer reverts", () =>
     expectRevert(
-      write("orch", vault, "debit", [USER, E("1"), orchAddr, keccak256(toHex("t0")), DEADLINE, "0x"]),
+      write("orch", vault, "debit", [USER, E("1"), orchAddr, keccak256(toHex("t0")), DEST, DEADLINE, "0x"]),
       "no authorizer",
       "debit before authorizer binding",
     ),
@@ -215,7 +228,7 @@ async function main() {
 
   await t("orchestrator cannot debit without a signature", () =>
     expectRevert(
-      write("orch", vault, "debit", [USER, E("100"), orchAddr, keccak256(toHex("t1")), DEADLINE, "0x"]),
+      write("orch", vault, "debit", [USER, E("100"), orchAddr, keccak256(toHex("t1")), DEST, DEADLINE, "0x"]),
       "bad authorization",
       "unsigned debit",
     ),
@@ -229,10 +242,30 @@ async function main() {
       to: orchAddr,
       transferId: keccak256(toHex("t1")),
     });
+    // signed = [user, amount, to, transferId, destination, deadline, signature]
     await expectRevert(
-      write("orch", vault, "debit", [USER, E("100"), orchAddr, signed[3], signed[4], signed[5]]),
+      write("orch", vault, "debit", [USER, E("100"), orchAddr, signed[3], signed[4], signed[5], signed[6]]),
       "bad authorization",
       "amount swapped after signing",
+    );
+  });
+
+  await t("a payment redirected to a different destination is rejected", async () => {
+    // Device signs a payout to destination A; the submitter tries to steer the
+    // same amount/transfer to destination B. The commitment is part of the
+    // signed digest, so the swap invalidates the signature.
+    const signed = await authorize(vault.address, userDevice, {
+      user: USER,
+      amount: E("1"),
+      to: orchAddr,
+      transferId: keccak256(toHex("t1")),
+      destination: keccak256(toHex("sepa|iban=DE00GRANDMA")),
+    });
+    const attackerDest = keccak256(toHex("sepa|iban=DE00ATTACKER"));
+    await expectRevert(
+      write("orch", vault, "debit", [signed[0], signed[1], signed[2], signed[3], attackerDest, signed[5], signed[6]]),
+      "bad authorization",
+      "recipient swapped after signing",
     );
   });
 

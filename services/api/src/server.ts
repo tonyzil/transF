@@ -27,6 +27,7 @@ import { isValidVpa } from "./adapters/upi.js";
 import { formatReport, reconcile } from "./reconcile.js";
 import {
   addrs,
+  destinationCommitment,
   eur,
   orchestratorAddress,
   paymentAuthorizationTypedData,
@@ -512,10 +513,17 @@ app.post(
       return res.status(409).json({ error: "quote already consumed" });
     }
     // Fix the exact terms the device is asked to sign. Nothing moves until a
-    // matching signature comes back to /authorize.
+    // matching signature comes back to /authorize. The destination commitment
+    // binds the payout target into the signature (see destinationCommitment):
+    // the device signs *who* is paid, not only how much.
     const amountWei = eur.toWei(transfer.sendEur);
     const deadline = Math.floor(Date.now() / 1000) + AUTH_WINDOW_SEC;
-    transfer.auth = { to: orchestratorAddress, amountWei: amountWei.toString(), deadline };
+    const destination = destinationCommitment(transfer.rail, {
+      phone: transfer.recipientPhone,
+      iban: transfer.recipientIban,
+      vpa: transfer.recipientVpa,
+    });
+    transfer.auth = { to: orchestratorAddress, amountWei: amountWei.toString(), destination, deadline };
     store.addTransfer(transfer);
     res.status(201).json({
       ...transfer,
@@ -526,6 +534,7 @@ app.post(
           amountWei,
           to: orchestratorAddress,
           transferId: transferIdHash(transfer.id),
+          destination,
           deadline,
         }),
         submitTo: `/api/transfers/${transfer.id}/authorize`,

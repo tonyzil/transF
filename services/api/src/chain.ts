@@ -10,6 +10,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { hardhat } from "viem/chains";
 import { KEYS, RPC_URL, loadAbi, loadDeployments, type Deployments } from "./config.js";
+import type { PayoutRail } from "./store.js";
 
 export const publicClient = createPublicClient({ chain: hardhat, transport: http(RPC_URL) });
 
@@ -68,6 +69,38 @@ export async function writeAndWait(
 }
 
 /**
+ * The keccak256 commitment to a payout destination that the device signs.
+ *
+ * The device authorization fixes the amount and the on-chain `to`, but the
+ * money actually leaves the system on a fiat leg (SEPA IBAN, UPI VPA, cash
+ * pickup phone) the contract can never see. Folding a hash of that target into
+ * the signed struct means the signature attests to *who* is paid: a server
+ * that later swaps the recipient produces a payout whose recomputed commitment
+ * no longer matches what the user signed, and the vault debit reverts.
+ *
+ * The preimage is canonical per rail so the browser, the API, and the
+ * orchestrator all derive the identical value from the same recipient:
+ *   cash → "cash|phone=<phone>"           (trimmed)
+ *   sepa → "sepa|iban=<IBAN>"             (whitespace-stripped, upper-cased)
+ *   upi  → "upi|vpa=<vpa>"                (trimmed, lower-cased)
+ * Keep this in lockstep with destinationCommitment() in public/device.js.
+ */
+export function destinationCommitment(
+  rail: PayoutRail,
+  target: { phone?: string; iban?: string; vpa?: string },
+): `0x${string}` {
+  let preimage: string;
+  if (rail === "sepa") {
+    preimage = `sepa|iban=${(target.iban ?? "").replace(/\s/g, "").toUpperCase()}`;
+  } else if (rail === "upi") {
+    preimage = `upi|vpa=${(target.vpa ?? "").trim().toLowerCase()}`;
+  } else {
+    preimage = `cash|phone=${(target.phone ?? "").trim()}`;
+  }
+  return keccak256(toHex(preimage));
+}
+
+/**
  * FP4: the EIP-712 payload the user's device signs to authorize one payment.
  * Mirrors RemitVault's PaymentAuthorization struct exactly — if these drift,
  * the digest changes and the contract rejects the signature.
@@ -77,6 +110,7 @@ export function paymentAuthorizationTypedData(args: {
   amountWei: bigint;
   to: `0x${string}`;
   transferId: `0x${string}`;
+  destination: `0x${string}`;
   deadline: number;
 }) {
   return {
@@ -92,6 +126,7 @@ export function paymentAuthorizationTypedData(args: {
         { name: "amount", type: "uint256" },
         { name: "to", type: "address" },
         { name: "transferId", type: "bytes32" },
+        { name: "destination", type: "bytes32" },
         { name: "deadline", type: "uint256" },
       ],
     },
@@ -101,6 +136,7 @@ export function paymentAuthorizationTypedData(args: {
       amount: args.amountWei.toString(),
       to: args.to,
       transferId: args.transferId,
+      destination: args.destination,
       deadline: args.deadline,
     },
   };

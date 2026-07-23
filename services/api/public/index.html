@@ -1121,15 +1121,15 @@ $("btn-send").onclick = async () => {
     if (!user.authorizerAddress) await registerDeviceKey(user);
 
     // 1. Propose: the server fixes the terms and returns them unexecuted.
-    const created = await api("/api/transfers", {
-      quoteId: quote.id,
+    const recipient = {
       recipientName: rail === "upi"
         ? (upiTarget.name || upiTarget.vpa)
         : ($("rec-name").value.trim() || "Recipient"),
       recipientPhone: $("rec-phone").value.trim() || "+254700000000",
       recipientIban: $("rec-iban").value.trim(),
       recipientVpa: upiTarget.vpa,
-    });
+    };
+    const created = await api("/api/transfers", { quoteId: quote.id, ...recipient });
 
     // 2. Authorize: unlock the device key with the passkey and sign the exact
     //    terms. With a PRF-capable authenticator the ceremony IS the gate —
@@ -1138,6 +1138,17 @@ $("btn-send").onclick = async () => {
     const addr = await dev.deviceAddress(credId());
     if (created.authorization.authorizer.toLowerCase() !== addr.toLowerCase()) {
       throw new Error("this account's spending key was registered in a different browser — sign in there, or rotate the key from that device");
+    }
+    // Recompute the payout commitment from what WE typed and refuse to sign if
+    // the server's signed terms name a different destination — this is what
+    // stops a tampered server redirecting the payment to another recipient.
+    const expectedDestination = dev.destinationCommitment(rail, {
+      phone: recipient.recipientPhone,
+      iban: recipient.recipientIban,
+      vpa: recipient.recipientVpa,
+    });
+    if (created.authorization.typedData.message.destination.toLowerCase() !== expectedDestination.toLowerCase()) {
+      throw new Error("the payout destination in the signed terms does not match the recipient you entered — not signing");
     }
     const signature = await dev.signTypedData(created.authorization.typedData, credId());
 
