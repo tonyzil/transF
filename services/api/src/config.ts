@@ -121,6 +121,10 @@ export const SECURITY = {
    *  check; the receiver is still safe because it re-reads the named order
    *  from Monerium rather than trusting the request body. */
   moneriumWebhookSecret: process.env.MONERIUM_WEBHOOK_SECRET ?? "",
+  /** How far a signed webhook timestamp may be from now before we refuse it.
+   *  Guards replay of a captured delivery we never received, which delivery-id
+   *  dedupe cannot catch. 0 disables the check. */
+  webhookToleranceSec: Number(process.env.MONERIUM_WEBHOOK_TOLERANCE_SEC ?? 300),
   /** Simple per-IP rate limits (requests per minute). */
   rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN ?? 300),
   authRateLimitPerMin: Number(process.env.AUTH_RATE_LIMIT_PER_MIN ?? 20),

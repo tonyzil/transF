@@ -638,6 +638,27 @@ app.post(
  * Monerium signs `${webhook-id}.${webhook-timestamp}.${rawBody}` with the
  * base64-decoded `whsec_...` secret and sends `webhook-signature: v1,<base64>`.
  */
+/**
+ * The signed timestamp is what stops a captured delivery being replayed years
+ * later. Delivery-id dedupe only rejects ids we have already seen, so it does
+ * nothing for a capture we never received. Accepts both the ISO-8601 and the
+ * unix-seconds forms, since we have not seen a real Monerium delivery yet.
+ * MONERIUM_WEBHOOK_TOLERANCE_SEC=0 disables the check.
+ */
+export function withinReplayWindow(
+  timestamp: string,
+  toleranceSec = SECURITY.webhookToleranceSec,
+  now = Date.now(),
+): boolean {
+  if (!toleranceSec) return true;
+  const asNumber = Number(timestamp);
+  const sentMs = Number.isFinite(asNumber) && timestamp.trim() !== ""
+    ? asNumber * 1000
+    : Date.parse(timestamp);
+  if (!Number.isFinite(sentMs)) return false;
+  return Math.abs(now - sentMs) <= toleranceSec * 1000;
+}
+
 function verifyWebhookSignature(req: express.Request): boolean {
   const secret = SECURITY.moneriumWebhookSecret;
   if (!secret) return true;
@@ -646,6 +667,7 @@ function verifyWebhookSignature(req: express.Request): boolean {
   const provided = req.header("webhook-signature") ?? "";
   const raw = (req as any).rawBody as Buffer | undefined;
   if (!id || !timestamp || !raw || !provided) return false;
+  if (!withinReplayWindow(timestamp)) return false;
   const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
   const signed = Buffer.concat([Buffer.from(`${id}.${timestamp}.`), raw]);
   const expected = `v1,${createHmac("sha256", key).update(signed).digest("base64")}`;
@@ -666,6 +688,13 @@ app.post(
       return res.json({ handled: false, duplicate: true });
     }
     const result = await handleWebhookEvent(req.body);
+    // Only spend the delivery id on a settled answer. `unavailable` means we
+    // could not reach Monerium to check — marking it processed would make our
+    // own outage look like a duplicate when Monerium retries the same id, and
+    // the deposit would never arrive by this path. 503 asks for that retry.
+    if (result.outcome === "unavailable") {
+      return res.status(503).json({ ...result, retry: true });
+    }
     if (webhookId) store.markWebhookProcessed(webhookId);
     res.json(result);
   }),

@@ -67,9 +67,12 @@
   and amount the body stated, unauthenticated. It now reads only an order
   id and re-reads that order from Monerium (mirrorOrderById), so a forged
   payload buys nothing; MONERIUM_WEBHOOK_SECRET adds an HMAC gate on top
-  (hex sha256 of the raw body in x-monerium-signature — OUR scheme, still
-  needs confirming against Monerium's real webhook docs before production).
-  npm run webhook:test covers it with a stub Monerium (7 checks).
+  (OpenClaw PR #32 replaced the guessed scheme with Monerium's documented
+  webhook-id/webhook-timestamp/webhook-signature HMAC, plus delivery-id
+  dedupe; PR #33 added a staleness window and stopped a transient Monerium
+  outage from consuming a delivery id — a 503 now asks for the retry instead
+  of silently swallowing it). npm run webhook:test covers it with a stub
+  Monerium.
 
 ## Security gate (red-team, July 2026 — fix before any hosted/public demo)
 Sessions+authz landed (PR #2). FP1+FP2 DONE (July 2026): simulate endpoints

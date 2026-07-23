@@ -6,6 +6,15 @@
  * expiry. All calls send the v2 Accept header.
  */
 
+/** A non-2xx response from Monerium, carrying the status so callers can tell
+ *  "this order does not exist" from "Monerium is briefly unreachable". */
+export class MoneriumApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "MoneriumApiError";
+  }
+}
+
 export interface MoneriumConfig {
   baseUrl: string; // https://api.monerium.dev (sandbox) | .app (production)
   clientId: string;
@@ -63,7 +72,10 @@ export class MoneriumClient {
     });
     const text = await res.text();
     if (!res.ok) {
-      throw new Error(`Monerium ${method} ${path} failed (${res.status}): ${text}`);
+      throw new MoneriumApiError(
+        `Monerium ${method} ${path} failed (${res.status}): ${text}`,
+        res.status,
+      );
     }
     return (text ? JSON.parse(text) : {}) as T;
   }

@@ -16,7 +16,12 @@
  */
 import { MONERIUM } from "../config.js";
 import { store, type User } from "../store.js";
-import { LINK_MESSAGE, MoneriumClient, type MoneriumOrder } from "./monerium-client.js";
+import {
+  LINK_MESSAGE,
+  MoneriumApiError,
+  MoneriumClient,
+  type MoneriumOrder,
+} from "./monerium-client.js";
 import { simulateSepaDeposit } from "./monerium.js";
 import { deploySmartAccount, isDeployed, signMessageAsSafe } from "../wallet/candide.js";
 
@@ -203,6 +208,13 @@ function isProcessed(o: MoneriumOrder): boolean {
 }
 
 /**
+ * What happened to a delivery. The distinction that matters is `unavailable`:
+ * it means we could not reach Monerium, not that the order is bad, so the
+ * caller must leave the delivery un-consumed and let the sender retry.
+ */
+export type MirrorOutcome = "mirrored" | "duplicate" | "ignored" | "unavailable";
+
+/**
  * Mirror one order that came from Monerium's own API into the local vault.
  *
  * The caller must have fetched `order` from Monerium — never pass in an
@@ -231,17 +243,26 @@ async function mirrorOrder(order: MoneriumOrder): Promise<boolean> {
  * forged payload achieves is asking us to re-check a real order, which is
  * idempotent.
  */
-export async function mirrorOrderById(orderId: string): Promise<boolean> {
-  if (store.isOrderProcessed(orderId)) return false;
+export async function mirrorOrderById(orderId: string): Promise<MirrorOutcome> {
+  if (store.isOrderProcessed(orderId)) return "duplicate";
   let order: MoneriumOrder;
   try {
     order = await getClient().getOrder(orderId);
   } catch (err: any) {
-    console.warn(`monerium: refusing unknown order ${orderId}: ${err?.message ?? err}`);
-    return false;
+    // A 404 is Monerium telling us this order does not exist — a settled
+    // answer. Anything else (5xx, a timeout, DNS) means we simply could not
+    // ask, and the caller must be free to try again rather than treat the
+    // delivery as spent.
+    const status = err instanceof MoneriumApiError ? err.status : 0;
+    if (status >= 400 && status < 500) {
+      console.warn(`monerium: refusing unknown order ${orderId}: ${err?.message ?? err}`);
+      return "ignored";
+    }
+    console.warn(`monerium: could not read order ${orderId}, will retry: ${err?.message ?? err}`);
+    return "unavailable";
   }
-  if (order.id !== orderId) return false;
-  return mirrorOrder(order);
+  if (order.id !== orderId) return "ignored";
+  return (await mirrorOrder(order)) ? "mirrored" : "ignored";
 }
 
 /** Every processed `issue` order Monerium knows about — the reconciler's
@@ -322,8 +343,11 @@ export function startDepositPoller() {
  * secret keeps strangers out, the re-read means even a leaked secret cannot
  * fabricate a deposit.
  */
-export async function handleWebhookEvent(event: any): Promise<{ handled: boolean }> {
+export async function handleWebhookEvent(
+  event: any,
+): Promise<{ handled: boolean; outcome: MirrorOutcome }> {
   const id = event?.data?.id ?? event?.order?.id ?? event?.id;
-  if (!id || typeof id !== "string") return { handled: false };
-  return { handled: await mirrorOrderById(id) };
+  if (!id || typeof id !== "string") return { handled: false, outcome: "ignored" };
+  const outcome = await mirrorOrderById(id);
+  return { handled: outcome === "mirrored", outcome };
 }

@@ -40,6 +40,9 @@ const children: ChildProcess[] = [];
 
 /* ---- stub Monerium: only what the adapter actually calls ---- */
 const orders = new Map<string, any>();
+/** Order ids the stub answers with 503 — Monerium briefly unreachable, as
+ *  distinct from a 404 that says the order genuinely does not exist. */
+const unavailable = new Set<string>();
 const stub = createServer((req, res) => {
   const send = (code: number, body: any) => {
     res.writeHead(code, { "content-type": "application/json" });
@@ -53,7 +56,9 @@ const stub = createServer((req, res) => {
   if (url.startsWith("/ibans")) return send(200, { ibans: [] });
   const one = url.match(/^\/orders\/([^?]+)/);
   if (one) {
-    const o = orders.get(decodeURIComponent(one[1]));
+    const wanted = decodeURIComponent(one[1]);
+    if (unavailable.has(wanted)) return send(503, { error: "service unavailable" });
+    const o = orders.get(wanted);
     return o ? send(200, o) : send(404, { error: "no such order" });
   }
   if (url.startsWith("/orders")) return send(200, { orders: [...orders.values()] });
@@ -282,6 +287,49 @@ try {
     assert.equal(r.status, 200);
     assert.equal(r.data.duplicate, true);
     assert.equal(await balance(), 50);
+  });
+
+
+  await t("a transient Monerium outage does not consume the delivery id", async () => {
+    // First delivery arrives while Monerium is unreachable for this order.
+    unavailable.add("real-9");
+    const body = { data: { id: "real-9" } };
+    const first = await post("/api/webhooks/monerium", body, signedHeaders("evt-real-9", body));
+    assert.equal(first.status, 503, "an unresolved delivery must ask for a retry");
+    assert.equal(first.data.outcome, "unavailable");
+
+    // Monerium recovers and retries the SAME delivery id, as its retry policy
+    // does. Previously the id had been marked processed and this was dropped
+    // as a duplicate, so the deposit never landed by this path.
+    unavailable.delete("real-9");
+    orders.set("real-9", {
+      id: "real-9", kind: "issue", state: "processed", meta: { state: "processed" },
+      address: user.address, amount: "33", currency: "eur", chain: "sepolia",
+    });
+    const retry = await post("/api/webhooks/monerium", body, signedHeaders("evt-real-9", body));
+    assert.equal(retry.status, 200);
+    assert.equal(retry.data.handled, true, "the retry must be accepted, not treated as a duplicate");
+    assert.equal(await balance(), 83, "€33 should have been credited on the retry");
+  });
+
+  await t("a definitively unknown order still consumes its delivery id", async () => {
+    // A 404 from Monerium is a settled answer, not an outage — retrying it
+    // forever would be pointless, so 200 tells the sender to stop.
+    const body = { data: { id: "nope-404" } };
+    const r = await post("/api/webhooks/monerium", body, signedHeaders("evt-404", body));
+    assert.equal(r.status, 200);
+    assert.equal(r.data.outcome, "ignored");
+  });
+
+  await t("a stale signed delivery is refused even with a valid signature", async () => {
+    const body = { data: { id: "real-1" } };
+    const old = new Date(Date.now() - 60 * 60_000).toISOString();
+    const r = await post("/api/webhooks/monerium", body, {
+      "webhook-id": "evt-stale",
+      "webhook-timestamp": old,
+      "webhook-signature": moneriumSignature("evt-stale", old, body),
+    });
+    assert.equal(r.status, 401, "an hour-old delivery is outside the replay window");
   });
 
   console.log(`\nWEBHOOK TEST PASSED — ${pass}/${pass}: body is untrusted, secret gate enforced`);
