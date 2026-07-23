@@ -82,7 +82,10 @@ function rateLimit(key: string, perMin: number): boolean {
 }
 app.use("/api", (req, res, next) => {
   const ip = req.ip ?? "?";
-  const authRoute = req.path.startsWith("/passkey") || (req.path === "/users" && req.method === "POST");
+  const authRoute =
+    req.path.startsWith("/passkey") ||
+    req.path === "/kyc/review" ||
+    (req.path === "/users" && req.method === "POST");
   const ok = authRoute
     ? rateLimit(`a:${ip}`, SECURITY.authRateLimitPerMin)
     : rateLimit(`g:${ip}`, SECURITY.rateLimitPerMin);
@@ -263,33 +266,108 @@ app.get(
   }),
 );
 
+/**
+ * Apply a KYC decision. Shared by the operator seam and the local mock-review
+ * endpoint so the two cannot drift — the authorization differs, the effect on
+ * the account must not.
+ */
+async function applyKycDecision(
+  user: User,
+  decision: "approved" | "rejected" | "manual_review",
+  provider: "mock" | "manual",
+  reason?: string,
+) {
+  const updated = store.updateUser(user.id, {
+    ...(decision === "approved"
+      ? fundableUserPatch(user)
+      : { funding: { ...user.funding!, status: "kyc_pending" as const } }),
+    kycStatus: decision,
+    kyc: {
+      provider,
+      checkedAt: new Date().toISOString(),
+      reason: typeof reason === "string" ? reason : undefined,
+    },
+  });
+  if (sandbox && decision === "approved") queueSandboxProvisioning(updated);
+  const balanceEur = await vaultBalance(updated.address).catch(() => 0);
+  return { ...publicUser(updated), balanceEur };
+}
+
+function readDecision(body: any, res: express.Response): "approved" | "rejected" | "manual_review" | undefined {
+  const decision = body?.decision;
+  if (!["approved", "rejected", "manual_review"].includes(decision)) {
+    res.status(400).json({ error: "decision must be approved, rejected or manual_review" });
+    return undefined;
+  }
+  return decision;
+}
+
+/**
+ * Operator authentication. Deliberately NOT a user session: a user must never
+ * be able to approve their own KYC, which is exactly what the session-scoped
+ * mock-review endpoint allows. Fails closed when no token is configured, so an
+ * unset secret means no approval path rather than an open one.
+ */
+function requireOperator(req: express.Request, res: express.Response): boolean {
+  const expected = KYC.operatorToken;
+  if (!expected) {
+    res.status(503).json({
+      error: "no KYC operator token configured — set KYC_OPERATOR_TOKEN to enable operator review",
+    });
+    return false;
+  }
+  const provided = bearerToken(req) ?? "";
+  const a = Buffer.from(expected);
+  const b = Buffer.from(provided);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    res.status(401).json({ error: "operator authorization required" });
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Operator / provider KYC review — the approval path that survives production.
+ *
+ * Without this the only way to approve anyone on a hosted deploy is
+ * ALLOW_SIMULATION=1, which also re-opens simulated SEPA deposits and cash
+ * pickup: you would have to turn on fake money to onboard a real user.
+ *
+ * A real provider integration (Sumsub/Persona) posts its decision here from
+ * its webhook using the same token; it cannot hold a user session, which is
+ * why this is not scoped under /users/:id.
+ */
+app.post(
+  "/api/kyc/review",
+  wrap(async (req, res) => {
+    if (!requireOperator(req, res)) return;
+    const user = store.findUser(req.body?.userId);
+    if (!user) return res.status(404).json({ error: "user not found" });
+    const decision = readDecision(req.body, res);
+    if (!decision) return;
+    const result = await applyKycDecision(user, decision, "manual", req.body?.reason);
+    console.log(`KYC: ${decision} for ${user.id} by operator`);
+    res.json(result);
+  }),
+);
+
+/** Local demo convenience: the user drives their own KYC decision. Gated on
+ *  ALLOW_SIMULATION because it is self-approval — see /api/kyc/review for the
+ *  path that works in production. */
 app.post(
   "/api/users/:id/kyc/mock-review",
   wrap(async (req, res) => {
     if (!SECURITY.allowSimulation) {
-      return res.status(403).json({ error: "mock KYC review is disabled in production" });
+      return res.status(403).json({
+        error: "mock KYC review is disabled in production — use POST /api/kyc/review with an operator token",
+      });
     }
     const user = store.findUser(req.params.id);
     if (!user) return res.status(404).json({ error: "user not found" });
     if (!requireUserSession(req, res, user.id)) return;
-    const decision = req.body?.decision;
-    if (!["approved", "rejected", "manual_review"].includes(decision)) {
-      return res.status(400).json({ error: "decision must be approved, rejected or manual_review" });
-    }
-    let updated = store.updateUser(user.id, {
-      ...(decision === "approved" ? fundableUserPatch(user) : { funding: { ...user.funding!, status: "kyc_pending" as const } }),
-      kycStatus: decision,
-      kyc: {
-        provider: "mock",
-        checkedAt: new Date().toISOString(),
-        reason: typeof req.body?.reason === "string" ? req.body.reason : undefined,
-      },
-    });
-    if (sandbox && decision === "approved") {
-      queueSandboxProvisioning(updated);
-    }
-    const balanceEur = await vaultBalance(updated.address).catch(() => 0);
-    res.json({ ...publicUser(updated), balanceEur });
+    const decision = readDecision(req.body, res);
+    if (!decision) return;
+    res.json(await applyKycDecision(user, decision, "mock", req.body?.reason));
   }),
 );
 

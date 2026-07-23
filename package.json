@@ -2,7 +2,7 @@
   "name": "zoll",
   "version": "0.1.0",
   "private": true,
-  "description": "Zoldenburg — cross-border remittance infrastructure (Zoll app: stablecoin in, local payout rails out)",
+  "description": "Zoldenburg \u2014 cross-border remittance infrastructure (Zoll app: stablecoin in, local payout rails out)",
   "type": "module",
   "scripts": {
     "dev": "tsx scripts/dev.ts",
@@ -27,7 +27,8 @@
     "reconcile": "tsx scripts/reconcile.ts",
     "reconcile:test": "tsx scripts/reconcile-test.ts",
     "anchor:test": "MG_ANCHOR_DOMAIN=testanchor.stellar.org MG_ANCHOR_ASSET=native tsx scripts/anchor-test.ts",
-    "anchor:safety": "tsx scripts/anchor-safety-test.ts"
+    "anchor:safety": "tsx scripts/anchor-safety-test.ts",
+    "kyc:operator:test": "tsx scripts/kyc-operator-test.ts"
   },
   "devDependencies": {
     "hardhat": "^2.26.0",
