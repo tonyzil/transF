@@ -50,7 +50,7 @@ contract RemitVault {
     bytes32 private constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
     bytes32 private constant PAYMENT_TYPEHASH =
-        keccak256("PaymentAuthorization(address account,uint256 amount,address to,bytes32 transferId,uint256 deadline)");
+        keccak256("PaymentAuthorization(address account,uint256 amount,address to,bytes32 transferId,bytes32 destination,uint256 deadline)");
     bytes32 private immutable DOMAIN_SEPARATOR;
 
     event Deposited(address indexed user, uint256 amount, bytes32 indexed ref);
@@ -105,15 +105,23 @@ contract RemitVault {
     }
 
     /// The EIP-712 digest a device signs to authorize one payment.
+    ///
+    /// `destination` is a keccak256 commitment to the off-chain payout target
+    /// (rail + IBAN / VPA / phone). This contract cannot see the fiat leg, so
+    /// it cannot check where the money lands — but by folding the commitment
+    /// into the signed digest, the device attests to *who* is paid, not just
+    /// how much. The submitter must recompute the same value from the payout it
+    /// is about to make; a redirected payout no longer matches the signature.
     function paymentDigest(
         address account,
         uint256 amount,
         address to,
         bytes32 transferId,
+        bytes32 destination,
         uint256 deadline
     ) public view returns (bytes32) {
         bytes32 structHash =
-            keccak256(abi.encode(PAYMENT_TYPEHASH, account, amount, to, transferId, deadline));
+            keccak256(abi.encode(PAYMENT_TYPEHASH, account, amount, to, transferId, destination, deadline));
         return keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
     }
 
@@ -213,6 +221,7 @@ contract RemitVault {
         uint256 amount,
         address to,
         bytes32 transferId,
+        bytes32 destination,
         uint256 deadline,
         bytes calldata signature
     ) external notPaused {
@@ -224,7 +233,7 @@ contract RemitVault {
         require(authorizer != address(0), "no authorizer");
         require(block.timestamp <= deadline, "authorization expired");
         require(
-            _isValidSignature(authorizer, paymentDigest(user, amount, to, transferId, deadline), signature),
+            _isValidSignature(authorizer, paymentDigest(user, amount, to, transferId, destination, deadline), signature),
             "bad authorization"
         );
 
