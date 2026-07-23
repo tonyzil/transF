@@ -12,7 +12,8 @@
  *   2. an id Monerium doesn't know is refused
  *   3. a genuine order id credits exactly what MONERIUM says, not the body
  *   4. replaying it credits nothing further
- *   5. with MONERIUM_WEBHOOK_SECRET set, an unsigned/mis-signed body is 401
+ *   5. with MONERIUM_WEBHOOK_SECRET set, Monerium's documented
+ *      webhook-id/timestamp/signature scheme is enforced
  *
  * Run: npm run webhook:test
  */
@@ -31,7 +32,7 @@ const RPC_URL = process.env.TRANSF_RPC_URL ?? "http://127.0.0.1:8545";
 const RPC_PORT = new URL(RPC_URL).port || "8545";
 const API = `http://127.0.0.1:${API_PORT}`;
 const STUB_PORT = Number(process.env.TRANSF_STUB_PORT ?? 8547);
-const SECRET = "test-webhook-secret";
+const SECRET = "whsec_" + Buffer.from("test-webhook-secret-32-byte-key!!").toString("base64");
 const bin = (n: string) => path.join(ROOT, "node_modules/.bin", n);
 
 let token = "";
@@ -79,6 +80,22 @@ async function post(pathname: string, body: any, headers: Record<string, string>
     headers: { "content-type": "application/json", ...headers },
   });
   return { status: res.status, data: await res.json().catch(() => ({})) };
+}
+
+function moneriumSignature(webhookId: string, timestamp: string, body: any, secret = SECRET) {
+  const raw = JSON.stringify(body);
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const signed = `${webhookId}.${timestamp}.${raw}`;
+  return `v1,${createHmac("sha256", key).update(signed).digest("base64")}`;
+}
+
+function signedHeaders(webhookId: string, body: any, secret = SECRET) {
+  const timestamp = new Date().toISOString();
+  return {
+    "webhook-id": webhookId,
+    "webhook-timestamp": timestamp,
+    "webhook-signature": moneriumSignature(webhookId, timestamp, body, secret),
+  };
 }
 
 function bg(cmd: string, args: string[], env: Record<string, string>) {
@@ -235,18 +252,35 @@ try {
 
   await t("a wrongly-signed delivery is rejected", async () => {
     const body = { data: { id: "real-2" } };
-    const bad = createHmac("sha256", "wrong-secret").update(JSON.stringify(body)).digest("hex");
-    const r = await post("/api/webhooks/monerium", body, { "x-monerium-signature": bad });
+    const r = await post("/api/webhooks/monerium", body, signedHeaders("evt-real-2-bad", body, "whsec_" + Buffer.from("wrong-secret-32-byte-key!!!!").toString("base64")));
     assert.equal(r.status, 401);
     assert.equal(await balance(), 40);
   });
 
   await t("a correctly-signed delivery is accepted", async () => {
     const body = { data: { id: "real-2" } };
-    const sig = createHmac("sha256", SECRET).update(JSON.stringify(body)).digest("hex");
-    const r = await post("/api/webhooks/monerium", body, { "x-monerium-signature": sig });
+    const r = await post("/api/webhooks/monerium", body, signedHeaders("evt-real-2", body));
     assert.equal(r.status, 200);
     assert.equal(r.data.handled, true);
+    assert.equal(await balance(), 50);
+  });
+
+  await t("a retried webhook delivery id is ignored", async () => {
+    orders.set("real-3", {
+      id: "real-3",
+      kind: "issue",
+      state: "processed",
+      meta: { state: "processed" },
+      address: user.address,
+      amount: "20",
+      currency: "eur",
+      chain: "sepolia",
+    });
+    const body = { data: { id: "real-3" } };
+    const headers = signedHeaders("evt-real-2", body);
+    const r = await post("/api/webhooks/monerium", body, headers);
+    assert.equal(r.status, 200);
+    assert.equal(r.data.duplicate, true);
     assert.equal(await balance(), 50);
   });
 

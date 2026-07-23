@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
-import { API_HOST, API_PORT, FX, moneriumSandboxEnabled, SECURITY } from "./config.js";
+import { API_HOST, API_PORT, FX, KYC, moneriumSandboxEnabled, SECURITY } from "./config.js";
 import { issueChallenge, verifyAssertion, verifyRegistration } from "./webauthn.js";
 import { initStore, store, type User } from "./store.js";
 import { createQuote, isExpired } from "./fx.js";
@@ -161,6 +161,31 @@ function requireUserSession(req: express.Request, res: express.Response, userId:
   return session;
 }
 
+function requireKycApproved(user: User, res: express.Response) {
+  if (user.kycStatus === "approved") return true;
+  res.status(409).json({
+    error: `KYC ${user.kycStatus}; account funding and transfers are disabled until KYC is approved`,
+    kycStatus: user.kycStatus,
+  });
+  return false;
+}
+
+function fundableUserPatch(user: User): Partial<User> {
+  if (sandbox) {
+    return { funding: { mode: "sandbox", status: "provisioning" } };
+  }
+  return {
+    iban: user.iban || issueIban(user.id),
+    funding: { mode: "mock", status: "active" },
+  };
+}
+
+function queueSandboxProvisioning(user: User) {
+  provisionFunding(user).catch((err) =>
+    console.error(`provisioning failed for ${user.id}: ${err?.message ?? err}`),
+  );
+}
+
 app.post(
   "/api/users",
   wrap(async (req, res) => {
@@ -169,34 +194,39 @@ app.post(
     if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return res.status(400).json({ error: "invalid email" });
     }
-    // Mock KYC: auto-approve. Real flow gates IBAN issuance on KYC pass.
     const id = randomUUID();
     // Candide Safe smart wallet: owner key + deterministic account address
     // (computed offline; deployed gaslessly during sandbox provisioning).
     const privateKey = generatePrivateKey();
     const ownerAddress = privateKeyToAccount(privateKey).address;
     const safeAddress = smartAccountFor(ownerAddress).accountAddress as `0x${string}`;
+    const kycStatus = KYC.autoApprove ? "approved" : "pending";
     const user: User = {
       id,
       name,
       email,
       country,
-      kycStatus: "approved",
-      iban: sandbox ? "" : issueIban(id),
+      kycStatus,
+      kyc: {
+        provider: KYC.autoApprove ? "mock" : "manual",
+        checkedAt: KYC.autoApprove ? new Date().toISOString() : undefined,
+      },
+      iban: kycStatus === "approved" && !sandbox ? issueIban(id) : "",
       address: safeAddress,
       ownerAddress,
       privateKey,
       wallet: { type: "candide-safe", deployed: false },
-      funding: { mode: sandbox ? "sandbox" : "mock", status: sandbox ? "provisioning" : "active" },
+      funding:
+        kycStatus === "approved"
+          ? { mode: sandbox ? "sandbox" : "mock", status: sandbox ? "provisioning" : "active" }
+          : { mode: sandbox ? "sandbox" : "mock", status: "kyc_pending" },
       createdAt: new Date().toISOString(),
     };
     store.addUser(user);
-    if (sandbox) {
+    if (sandbox && kycStatus === "approved") {
       // Wallet deploy (~20s) + Monerium provisioning run in the background;
       // the UI polls funding status until the IBAN lands.
-      provisionFunding(user).catch((err) =>
-        console.error(`provisioning failed for ${user.id}: ${err?.message ?? err}`),
-      );
+      queueSandboxProvisioning(user);
     }
     res.status(201).json(withSession(user));
   }),
@@ -213,6 +243,52 @@ app.get(
     }
     const balanceEur = await vaultBalance(user.address);
     res.json({ ...publicUser(user), balanceEur });
+  }),
+);
+
+app.get(
+  "/api/users/:id/kyc",
+  wrap(async (req, res) => {
+    const user = store.findUser(req.params.id);
+    if (!user) return res.status(404).json({ error: "user not found" });
+    if (!requireUserSession(req, res, user.id)) return;
+    res.json({
+      userId: user.id,
+      country: user.country,
+      kycStatus: user.kycStatus,
+      kyc: user.kyc,
+      funding: user.funding,
+    });
+  }),
+);
+
+app.post(
+  "/api/users/:id/kyc/mock-review",
+  wrap(async (req, res) => {
+    if (!SECURITY.allowSimulation) {
+      return res.status(403).json({ error: "mock KYC review is disabled in production" });
+    }
+    const user = store.findUser(req.params.id);
+    if (!user) return res.status(404).json({ error: "user not found" });
+    if (!requireUserSession(req, res, user.id)) return;
+    const decision = req.body?.decision;
+    if (!["approved", "rejected", "manual_review"].includes(decision)) {
+      return res.status(400).json({ error: "decision must be approved, rejected or manual_review" });
+    }
+    let updated = store.updateUser(user.id, {
+      ...(decision === "approved" ? fundableUserPatch(user) : { funding: { ...user.funding!, status: "kyc_pending" as const } }),
+      kycStatus: decision,
+      kyc: {
+        provider: "mock",
+        checkedAt: new Date().toISOString(),
+        reason: typeof req.body?.reason === "string" ? req.body.reason : undefined,
+      },
+    });
+    if (sandbox && decision === "approved") {
+      queueSandboxProvisioning(updated);
+    }
+    const balanceEur = await vaultBalance(updated.address).catch(() => 0);
+    res.json({ ...publicUser(updated), balanceEur });
   }),
 );
 
@@ -325,6 +401,7 @@ app.post(
     const user = store.findUserByIban(iban);
     if (!user) return res.status(404).json({ error: "no account with that IBAN" });
     if (!requireUserSession(req, res, user.id)) return;
+    if (!requireKycApproved(user, res)) return;
     const ref = `sepa-${randomUUID()}`;
     const txs = await simulateSepaDeposit(user.address, amount, ref);
     const balanceEur = await vaultBalance(user.address);
@@ -341,6 +418,7 @@ app.post(
     const user = store.findUser(userId);
     if (!user) return res.status(404).json({ error: "user not found" });
     if (!requireUserSession(req, res, user.id)) return;
+    if (!requireKycApproved(user, res)) return;
     if (!["cash", "sepa", "upi"].includes(rail)) {
       return res.status(400).json({ error: "rail must be cash, sepa or upi" });
     }
@@ -399,6 +477,7 @@ app.post(
       return res.status(400).json({ error: "recipientPhone required for cash pickup" });
     }
     const user = store.findUser(quote.userId)!;
+    if (!requireKycApproved(user, res)) return;
     const balance = await vaultBalance(user.address);
     if (balance < quote.sendEur) {
       return res.status(400).json({ error: `insufficient balance (€${balance.toFixed(2)})` });
@@ -489,6 +568,7 @@ app.post(
     const user = store.findUser(req.params.id);
     if (!user) return res.status(404).json({ error: "user not found" });
     if (!requireUserSession(req, res, user.id)) return;
+    if (!requireKycApproved(user, res)) return;
     const address = req.body?.address;
     if (typeof address !== "string" || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
       return res.status(400).json({ error: "address required (0x-prefixed, 20 bytes)" });
@@ -532,6 +612,7 @@ app.post(
       return res.status(410).json({ error: "authorization window expired, create a new transfer" });
     }
     const user = store.findUser(transfer.userId)!;
+    if (!requireKycApproved(user, res)) return;
     store.updateTransfer(transfer.id, {
       auth: { ...transfer.auth, authorizedAt: new Date().toISOString() },
     });
@@ -554,19 +635,22 @@ app.post(
  * ignores everything else in the body. Set MONERIUM_WEBHOOK_SECRET to also
  * keep strangers from making us do the lookup.
  *
- * The header name and digest encoding are ours (hex HMAC-SHA256 over the raw
- * body); confirm them against Monerium's webhook docs before relying on this
- * in production, since we have not seen a signed delivery from them yet.
+ * Monerium signs `${webhook-id}.${webhook-timestamp}.${rawBody}` with the
+ * base64-decoded `whsec_...` secret and sends `webhook-signature: v1,<base64>`.
  */
 function verifyWebhookSignature(req: express.Request): boolean {
   const secret = SECURITY.moneriumWebhookSecret;
   if (!secret) return true;
-  const provided = req.header("x-monerium-signature") ?? "";
+  const id = req.header("webhook-id") ?? "";
+  const timestamp = req.header("webhook-timestamp") ?? "";
+  const provided = req.header("webhook-signature") ?? "";
   const raw = (req as any).rawBody as Buffer | undefined;
-  if (!raw || !provided) return false;
-  const expected = createHmac("sha256", secret).update(raw).digest("hex");
+  if (!id || !timestamp || !raw || !provided) return false;
+  const key = Buffer.from(secret.replace(/^whsec_/, ""), "base64");
+  const signed = Buffer.concat([Buffer.from(`${id}.${timestamp}.`), raw]);
+  const expected = `v1,${createHmac("sha256", key).update(signed).digest("base64")}`;
   const a = Buffer.from(expected);
-  const b = Buffer.from(provided.replace(/^sha256=/, ""));
+  const b = Buffer.from(provided);
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
@@ -577,7 +661,13 @@ app.post(
     if (!verifyWebhookSignature(req)) {
       return res.status(401).json({ error: "invalid webhook signature" });
     }
-    res.json(await handleWebhookEvent(req.body));
+    const webhookId = req.header("webhook-id");
+    if (webhookId && store.isWebhookProcessed(webhookId)) {
+      return res.json({ handled: false, duplicate: true });
+    }
+    const result = await handleWebhookEvent(req.body);
+    if (webhookId) store.markWebhookProcessed(webhookId);
+    res.json(result);
   }),
 );
 

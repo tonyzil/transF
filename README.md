@@ -47,6 +47,10 @@ Running this repo with sandbox credentials, today:
   attestation polling, and Stellar `mint_and_forward`.
 - **Passkeys**: onboarding registers a WebAuthn credential and returning
   users sign in with it.
+- **KYC gate**: local demos auto-approve by default, but `KYC_AUTO_APPROVE=0`
+  starts users as `pending`; IBAN issuance, deposits, device binding, quotes,
+  and transfers fail closed until a review approves the account. The included
+  mock review endpoint is for local tests only, not a regulated provider.
 
 ## What's simulated
 
@@ -129,7 +133,11 @@ meant to be read in one sitting.
 
 - `npm run dev` resets the local chain and the demo users each start.
 - Quotes lock a rate for ten minutes; nothing hedges the exposure.
-- Webhook signature verification (Monerium) is also a marked TODO.
+- Production must set `KYC_AUTO_APPROVE=0` and replace the local mock-review
+  seam with a real KYC provider before issuing IBANs or allowing payments.
+- Monerium webhooks verify the documented `webhook-signature` HMAC when
+  `MONERIUM_WEBHOOK_SECRET=whsec_...` is set; leave it unset only for local
+  sandbox polling or stubbed tests.
 - The default Hardhat keys are refused on non-local RPC URLs unless
   `ALLOW_DEV_KEYS_ON_EXTERNAL_RPC=1` is explicitly set.
 

@@ -18,6 +18,7 @@
     "e2e": "tsx scripts/e2e.ts",
     "webauthn:selftest": "tsx scripts/webauthn-selftest.ts",
     "fp3:test": "tsx scripts/fp3-test.ts",
+    "kyc:test": "tsx scripts/kyc-test.ts",
     "audit:deps": "npm audit",
     "check": "tsx scripts/check.ts",
     "fp5:test": "tsx scripts/fp5-binding-test.ts",

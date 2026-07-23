@@ -13,6 +13,7 @@ const scripts = [
   "compile",
   "test:contracts",
   "webauthn:selftest",
+  "kyc:test",
   "fp3:test",
   "fp4:test",
   "fp5:test",

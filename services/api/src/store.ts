@@ -2,12 +2,20 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "
 import path from "node:path";
 import { ROOT } from "./config.js";
 
+export type KycStatus = "pending" | "approved" | "rejected" | "manual_review";
+
 export interface User {
   id: string;
   name: string;
   email?: string;
   country: string;
-  kycStatus: "approved"; // mock KYC auto-approves; real flow: Sumsub/Persona
+  kycStatus: KycStatus;
+  kyc?: {
+    provider: "mock" | "manual";
+    applicantId?: string;
+    checkedAt?: string;
+    reason?: string;
+  };
   iban: string; // funding IBAN — mock-issued, or real from Monerium sandbox
   /** Candide Safe smart-account address — the user's identity everywhere:
    *  the RemitVault ledger and the address Monerium attaches the IBAN to. */
@@ -35,7 +43,7 @@ export interface User {
   /** mock: IBAN issued locally. sandbox states track Monerium provisioning. */
   funding?: {
     mode: "mock" | "sandbox";
-    status: "active" | "provisioning" | "iban_pending" | "error";
+    status: "kyc_pending" | "active" | "provisioning" | "iban_pending" | "error";
     moneriumProfileId?: string;
     detail?: string;
   };
@@ -156,12 +164,21 @@ interface Db {
   sessions: Session[];
   /** Monerium issue-order ids already mirrored into the vault. */
   processedMoneriumOrders: string[];
+  /** Monerium webhook delivery ids already accepted. */
+  processedMoneriumWebhooks: string[];
 }
 
 const DATA_DIR = path.join(ROOT, "data");
 const DB_PATH = path.join(DATA_DIR, "db.json");
 
-let db: Db = { users: [], quotes: [], transfers: [], sessions: [], processedMoneriumOrders: [] };
+let db: Db = {
+  users: [],
+  quotes: [],
+  transfers: [],
+  sessions: [],
+  processedMoneriumOrders: [],
+  processedMoneriumWebhooks: [],
+};
 
 export function initStore() {
   mkdirSync(DATA_DIR, { recursive: true });
@@ -169,6 +186,7 @@ export function initStore() {
     db = JSON.parse(readFileSync(DB_PATH, "utf8"));
     db.sessions ??= [];
     db.processedMoneriumOrders ??= [];
+    db.processedMoneriumWebhooks ??= [];
     for (const q of db.quotes) q.status ??= "OPEN";
     for (const s of db.sessions) s.expiresAt ??= new Date(Date.parse(s.createdAt) + 24 * 60 * 60 * 1000).toISOString();
   } else {
@@ -221,6 +239,13 @@ export const store = {
   },
   markOrderProcessed(orderId: string) {
     db.processedMoneriumOrders.push(orderId);
+    persist();
+  },
+  isWebhookProcessed(webhookId: string) {
+    return db.processedMoneriumWebhooks.includes(webhookId);
+  },
+  markWebhookProcessed(webhookId: string) {
+    db.processedMoneriumWebhooks.push(webhookId);
     persist();
   },
   addQuote(q: Quote) {
