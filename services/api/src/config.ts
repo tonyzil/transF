@@ -51,7 +51,25 @@ export const KYC = {
   autoApprove:
     process.env.KYC_AUTO_APPROVE === "1" ||
     (process.env.KYC_AUTO_APPROVE !== "0" && process.env.NODE_ENV !== "production"),
+  /**
+   * Shared secret an operator (or a KYC provider's webhook) presents to record
+   * a decision. This is the ONLY approval path that survives production: the
+   * mock-review endpoint is gated on ALLOW_SIMULATION, and turning that on to
+   * approve a user would also re-open simulated deposits and cash pickup.
+   *
+   * Unset means no operator path at all — fail closed rather than leave an
+   * unauthenticated admin endpoint exposed.
+   */
+  operatorToken: process.env.KYC_OPERATOR_TOKEN ?? "",
 };
+
+// A guessable operator token is worse than none: it is a remote approval
+// switch for every account. Refuse to start rather than serve one.
+if (KYC.operatorToken && KYC.operatorToken.length < 24) {
+  throw new Error(
+    "KYC_OPERATOR_TOKEN is too short (need >= 24 chars) — generate one with `openssl rand -base64 32`",
+  );
+}
 
 /**
  * CCTP bridge (Base Sepolia -> Stellar testnet). Dry-run by default: the
