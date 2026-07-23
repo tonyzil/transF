@@ -3,39 +3,45 @@
 Written for an agent picking this up cold. Read `CLAUDE.md` first for
 environment and branch rules; this file covers only the cash corridor.
 
-> **This describes the tree with PR #16 merged.** `sep24WithdrawLimits` and
-> `refreshAnchorPickup` land in that PR — if you are on a checkout without
-> them, you are on a stale base. See "Depends on" at the end.
+> **Current after PR #33.** The old Base Sepolia CCTP path still exists in code
+> as the first live bridge worker, but the chosen public-chain target is now
+> **Polygon + its testnet (Amoy)** because EURe is native there. Do not deepen
+> Base-specific assumptions unless the user explicitly reopens that path.
 
 ## The one-sentence problem
 
-The Kenya cash rail is protocol-correct right up to the point where money
-should move, and then it stops: we lock mock USDC in a local escrow contract,
-open a real SEP-24 withdrawal session at the anchor, and never bridge or send
-anything. A recipient could not collect cash.
+The Kenya cash rail is protocol-correct and has a real Stellar anchor payment
+path, but it is not yet proven as a live value corridor on the chosen chain.
+The next version should run on Polygon/Amoy so Monerium EURe is native there,
+then prove EURe funding, USDC/CCTP or partner settlement, Stellar treasury
+funding, and anchor completion end to end.
 
 ## What is true today
 
-**The bridge leg is a local mock.** `executeTransfer` in
-`services/api/src/orchestrator.ts` calls `BridgeEscrow.lockForPayout`, which
-moves mock USDC between addresses on the local Hardhat chain. Nothing crosses
-to Stellar.
+**The demo settlement leg is still local.** In dry-run/default mode,
+`executeTransfer` records the CCTP burn/mint plan and still uses
+`BridgeEscrow.lockForPayout` with mock USDC on local Hardhat so the no-credential
+demo can finish.
 
-**Real CCTP code exists and is wired to nothing.** `bridgeUsdcToStellar` in
-`services/api/src/bridge/cctp.ts` builds the Base Sepolia burn, polls Circle's
-Iris attestation API, and prepares the Soroban mint. It has exactly one
-caller: `scripts/cctp-dryrun.ts`. It has never run against the orchestrator.
+**The existing CCTP worker is Base Sepolia-specific.** `bridgeUsdcToStellar` in
+`services/api/src/bridge/cctp.ts` can build and, with `CCTP_LIVE=1`, submit the
+Base Sepolia burn, poll Circle's Iris attestation API, and submit Stellar
+`mint_and_forward`. It is wired into the cash orchestrator now, but it is no
+longer the strategic target. Treat it as the reference worker to port to
+Polygon/Amoy unless the user asks for Base.
 
-**The anchor session is real but inert.** `createCashPickupViaAnchor` in
-`services/api/src/adapters/moneygram.ts` does genuine SEP-10 auth and opens a
-genuine SEP-24 withdrawal with a validated amount. But SEP-24 only completes
-once the asset is sent **on-ledger to the anchor's account with its memo**,
-and we never do that. A real withdrawal sits at `pending_user_transfer_start`
-forever. `refreshAnchorPickup` polls and reports that honestly.
+**The anchor session can be funded on-ledger.** `createCashPickupViaAnchor`
+does genuine SEP-10 auth and opens a genuine SEP-24 withdrawal with a validated
+asset amount. `refreshPayout` calls `fundAndRefreshAnchorPickup`, persists the
+Stellar payment hash as soon as it exists, and marks PAID only after the anchor
+reports completion. The unproven part is operational: the treasury must actually
+hold the selected anchor asset with the right trustline/balance, and the whole
+path needs a live small-amount run.
 
-**Settlement is simulated.** `POST /api/simulate/pickup` marks the transfer
-PAID and settles the escrow. That endpoint is dev-only (`ALLOW_SIMULATION`),
-so in production the rail currently has no completion path at all.
+**Simulation remains dev-only.** `POST /api/simulate/pickup` is still the mock
+completion button for local demos. It must stay disabled for real hosted demos
+unless a live payout adapter has completed or the response clearly says the
+payout is simulated.
 
 ## Two tasks, in this order
 
@@ -59,20 +65,23 @@ Acceptance:
   path (see `failAndCompensate`) rather than stranding the transfer
 - `npm run anchor:test` still passes, extended with the new behaviour
 
-### B. Wire CCTP into the bridge leg
+### B. Port the bridge/funding leg to Polygon/Amoy
 
-Replace the mock escrow with a real burn on Base Sepolia and mint on Stellar,
-so there is genuine USDC on Stellar for task A to send.
+Replace the local mock escrow / Base-specific worker with the chosen Polygon
+path. The reason for Polygon is native EURe availability: it removes the local
+EURe mirror seam and makes the user's IBAN-funded asset live on the same public
+chain as the app's settlement contracts.
 
-`CCTP` config lives in `services/api/src/config.ts`: Stellar domain is 27,
-mints route through the `CctpForwarder` (both `mintRecipient` **and**
-`destinationCaller` must be the forwarder — this is a Circle rule, not a
-choice), Iris attestation polling is already implemented.
+Use Amoy for testnet work. Keep the existing Base Sepolia CCTP worker as a
+reference for Circle burn/attestation/mint mechanics, but do not assume its
+contract addresses, source domain, gas asset, or funding checklist carry over.
+Confirm the current Polygon/Amoy CCTP deployments and domain from primary
+Circle docs before changing config defaults.
 
 Acceptance:
 
-- the orchestrator's bridge step performs a real burn when `CCTP_LIVE=1`, and
-  the existing dry-run plan otherwise
+- the orchestrator's funding/bridge step uses Polygon/Amoy when live mode is
+  enabled, and the existing dry-run/demo path otherwise
 - attestation polling failures compensate rather than strand
 - the transfer records the burn tx hash and the Stellar mint, the way other
   legs record `txs` entries
@@ -82,16 +91,18 @@ Acceptance:
 
 Neither task can be *proven* without these. If you cannot get them, say so
 explicitly and deliver dry-run code plus tests — do not merge something that
-reads as finished but has never executed. That is exactly how the existing
-CCTP worker ended up written, wired to nothing, and unexercised.
+reads as finished but has never executed. That is how bridge code becomes
+believable on paper while the corridor still has not moved real value.
 
-- `CCTP_BURNER_KEY` funded with Base Sepolia ETH **and** testnet USDC
-  (faucet.circle.com)
+- Polygon/Amoy funding for the live worker: native gas token plus whatever
+  Circle/partner test asset the chosen path burns or settles
 - a Stellar treasury holding the anchor's asset, with the trustline
   established. Note SRT on `testanchor.stellar.org` is obtained through the
   anchor's *interactive deposit flow*, so it is not scriptable
 - confirmation of which asset to use: testanchor supports SRT, native and
   USDC for withdrawal
+- Monerium configured for Polygon/Amoy so EURe is native on the public-chain
+  target rather than mirrored into local Hardhat
 
 ## Traps
 
@@ -131,16 +142,9 @@ when a property breaks. Match that:
   confirm the content landed. A merge silently dropped a commit once already
   (PR #3, recovered in PR #4)
 
-## Depends on
-
-PR #16 (`claude/anchor-withdrawal-amounts`) must merge first. It changes
-`createCashPickupViaAnchor`'s signature, adds `sep24WithdrawLimits`, and
-changes the orchestrator's pickup call — the same three files this work
-touches. Starting before it lands means conflicting inside the function you
-are changing.
-
 ## Not in scope
 
 - FP4's remaining half (`user.privateKey` still signs Monerium linking and
   redeem orders server-side). Someone is already on it — do not start.
-- The mirror seam and its reconciler. Both disappear on the Polygon migration.
+- The mirror seam and its reconciler, except to remove them as part of the
+  Polygon migration once native EURe replaces the local mirror.
