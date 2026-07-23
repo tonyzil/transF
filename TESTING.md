@@ -78,6 +78,20 @@ before using live credentials: `MG_AUTH_MEMO` for custodial positive-integer
 user memos, plus `MG_CLIENT_DOMAIN` and `MG_CLIENT_DOMAIN_SIGNING_SECRET` if
 MoneyGram requires client-domain attribution.
 
+Stellar variables the code understands:
+
+- `MG_ANCHOR_DOMAIN` — anchor home domain, for example `testanchor.stellar.org`
+- `MG_ANCHOR_ASSET` — withdrawal asset, `SRT` for the public test anchor or
+  partner-confirmed `USDC` for MoneyGram production
+- `STELLAR_TREASURY_SECRET` — treasury signer for SEP-10 auth and on-ledger
+  SEP-24 payment
+- `STELLAR_HORIZON`, `STELLAR_SOROBAN_RPC`, `STELLAR_PASSPHRASE`,
+  `STELLAR_FRIENDBOT` — default to public Stellar testnet endpoints
+
+The treasury must hold the anchor asset and have the required trustline.
+`testanchor.stellar.org` can use `native` with no trustline for protocol
+tests, but production MoneyGram/USDC requires the partner-confirmed asset.
+
 ### CCTP bridge (Base Sepolia → Stellar testnet)
 
 ```sh
@@ -88,6 +102,11 @@ npm run cctp:readiness   # validates live CCTP env + balances, moves nothing
 To execute for real: fund an EOA with Base Sepolia ETH (any faucet) + testnet
 USDC (<https://faucet.circle.com>), set `CCTP_BURNER_KEY`,
 `STELLAR_TREASURY_SECRET`, and `CCTP_LIVE=1`.
+
+`npm run cctp:readiness` also checks the Stellar CCTP contract strkeys:
+`CCTP_STELLAR_FORWARDER` and `CCTP_STELLAR_MSG_TRANSMITTER`. They default to
+the current testnet values in `services/api/src/config.ts`; override them only
+when Circle/Stellar publishes new deployments.
 
 ## Known limitations (by design, MVP)
 

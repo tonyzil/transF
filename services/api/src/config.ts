@@ -43,6 +43,17 @@ export const moneriumSandboxEnabled = () =>
   Boolean(MONERIUM.clientId && MONERIUM.clientSecret);
 
 /**
+ * KYC gate. Local demos auto-approve by default so existing self-contained
+ * tests keep running. Production and KYC_AUTO_APPROVE=0 start users in
+ * `pending`; an external provider integration should call the review seam.
+ */
+export const KYC = {
+  autoApprove:
+    process.env.KYC_AUTO_APPROVE === "1" ||
+    (process.env.KYC_AUTO_APPROVE !== "0" && process.env.NODE_ENV !== "production"),
+};
+
+/**
  * CCTP bridge (Base Sepolia -> Stellar testnet). Dry-run by default: the
  * worker builds and logs the exact transactions; CCTP_LIVE=1 plus a funded
  * key executes them for real.
