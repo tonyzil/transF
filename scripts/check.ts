@@ -14,6 +14,7 @@ const scripts = [
   "test:contracts",
   "webauthn:selftest",
   "kyc:test",
+  "kyc:ui:test",
   "fp3:test",
   "fp4:test",
   "fp5:test",

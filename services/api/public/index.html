@@ -143,6 +143,13 @@
   .pstep.active .pdot { border-color: var(--acc2); animation: pulse 1.2s infinite; }
   .pstep.done { color: var(--muted); }
   .pstep.done .pdot { border-color: var(--green); background: rgba(61, 214, 140, 0.1); color: var(--green); }
+  .kyc-status {
+    margin-top: 1rem; padding: .85rem .95rem; border-radius: 10px;
+    background: rgba(245, 166, 35, 0.06); border: 1px solid rgba(245, 166, 35, 0.3);
+  }
+  .kyc-status .ks { font-size: .72rem; color: var(--amber); font-weight: 700; letter-spacing: .1em; text-transform: uppercase; }
+  .kyc-status .kt { margin-top: .2rem; font-size: .95rem; font-weight: 700; }
+  .kyc-status .kd { margin-top: .25rem; font-size: .8rem; color: var(--muted); }
 
   .panel {
     background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
@@ -222,6 +229,7 @@
   .chip.ok { background: rgba(61, 214, 140, 0.1); color: var(--green); border: 1px solid rgba(61, 214, 140, 0.35); }
   .chip.pend { background: rgba(245, 166, 35, 0.1); color: var(--amber); border: 1px solid rgba(245, 166, 35, 0.3); }
   .chip.err { background: rgba(244, 67, 108, 0.1); color: var(--red); border: 1px solid rgba(244, 67, 108, 0.3); }
+  .chip.review { background: rgba(139, 92, 246, 0.1); color: #b894ff; border: 1px solid rgba(139, 92, 246, 0.35); }
   .spark { flex: none; }
   .detail { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .5rem 0; border-top: 1px solid var(--border); margin-top: .1rem; }
   .detail .k { font-size: .68rem; color: var(--faint); font-weight: 600; letter-spacing: .06em; white-space: nowrap; }
@@ -410,6 +418,22 @@
     </div>
   </section>
 
+  <!-- ============ KYC review state ============ -->
+  <section id="kyc-review" style="display:none; min-height:100vh; place-items:center; padding:1.5rem">
+    <div class="prov-card">
+      <h1 id="kyc-title">Identity review</h1>
+      <div class="sub" id="kyc-sub">Your account is created. Funding and transfers unlock after approval.</div>
+      <div class="kyc-status">
+        <div class="ks" id="kyc-label">PENDING</div>
+        <div class="kt" id="kyc-main">Review in progress</div>
+        <div class="kd" id="kyc-detail">Your IBAN, deposits, device key, quotes, and transfers are paused until approval.</div>
+      </div>
+      <button class="wide" id="btn-kyc-refresh">Refresh status</button>
+      <button class="ghost wide" id="btn-kyc-dashboard">View dashboard</button>
+      <div class="error hidden" id="kyc-err"></div>
+    </div>
+  </section>
+
   <!-- ============ app shell ============ -->
   <section id="dashboard">
     <aside class="side">
@@ -430,6 +454,16 @@
         <h1>Dashboard</h1>
         <div class="search">⌕ Search…</div>
         <div class="net-chip">local demo</div>
+      </div>
+
+      <div class="card hidden" id="kyc-card">
+        <h2>Identity review</h2>
+        <div class="kyc-status" style="margin-top:0">
+          <div class="ks" id="dash-kyc-label">PENDING</div>
+          <div class="kt" id="dash-kyc-main">Review in progress</div>
+          <div class="kd" id="dash-kyc-detail">Funding and transfers unlock after approval.</div>
+        </div>
+        <button class="ghost wide" id="btn-dash-kyc-refresh">Refresh status</button>
       </div>
 
       <div class="card acct">
@@ -580,6 +614,13 @@ const deviceLib = new Promise((resolve) => { window.__deviceLibReady = resolve; 
 let sessionToken = localStorage.getItem("zoll-session") || null;
 
 const fmt = (n, dp = 2) => Number(n).toLocaleString("en", { minimumFractionDigits: dp, maximumFractionDigits: dp });
+const kycApproved = (u = user) => (u?.kycStatus || "approved") === "approved";
+const kycCopy = (status = "pending") => ({
+  pending: ["PENDING", "Review in progress", "Your IBAN, deposits, device key, quotes, and transfers are paused until approval."],
+  manual_review: ["MANUAL REVIEW", "Additional review needed", "A reviewer needs to approve this account before funding and transfers unlock."],
+  rejected: ["REJECTED", "Review not approved", "Funding and transfers are disabled for this account."],
+  approved: ["APPROVED", "Account approved", "Funding and transfers are available."],
+}[status] || ["REVIEW", `KYC ${status}`, "Funding and transfers are paused until approval."]);
 
 async function api(path, body) {
   const headers = {};
@@ -603,10 +644,14 @@ function renderUser(u) {
     localStorage.setItem("zoll-session", sessionToken);
   }
   user = u;
+  renderKycState(u);
   $("balance").innerHTML = `<span class="cur">€</span>${fmt(u.balanceEur ?? 0)}`;
   $("address").textContent = u.address;
   const chip = $("fund-chip");
-  if (u.iban) {
+  if (!kycApproved(u)) {
+    $("iban").textContent = kycCopy(u.kycStatus)[2];
+    chip.textContent = "KYC"; chip.className = u.kycStatus === "rejected" ? "chip err" : "chip review";
+  } else if (u.iban) {
     $("iban").textContent = u.iban;
     chip.textContent = "ACTIVE"; chip.className = "chip ok";
   } else if ((u.funding || {}).status === "error") {
@@ -616,6 +661,25 @@ function renderUser(u) {
     $("iban").textContent = `${(u.funding || {}).detail || "provisioning via Monerium sandbox"}…`;
     chip.textContent = "PENDING"; chip.className = "chip pend";
   }
+}
+
+function renderKycState(u = user) {
+  if (!u) return;
+  const blocked = !kycApproved(u);
+  const [label, main, detail] = kycCopy(u.kycStatus);
+  for (const [id, value] of [
+    ["kyc-label", label], ["kyc-main", main], ["kyc-detail", detail],
+    ["dash-kyc-label", label], ["dash-kyc-main", main], ["dash-kyc-detail", detail],
+  ]) {
+    const el = $(id);
+    if (el) el.textContent = value;
+  }
+  $("kyc-card")?.classList.toggle("hidden", !blocked);
+  $("btn-deposit").disabled = blocked;
+  $("btn-send").disabled = blocked;
+  document.querySelectorAll(".dest-btn").forEach((b) => { b.disabled = blocked; });
+  $("fund-card")?.classList.toggle("hidden", blocked);
+  $("send-card")?.classList.toggle("hidden", blocked);
 }
 
 async function refresh() {
@@ -632,12 +696,39 @@ function provStep(i, state) {
 function enterDashboard(name) {
   $("onboard").style.display = "none";
   $("provisioning").style.display = "none";
+  $("kyc-review").style.display = "none";
   $("dashboard").style.display = "grid";
   $("userpill").style.display = "flex";
   $("pillname").textContent = name;
   $("avatar").textContent = name.trim()[0].toUpperCase();
   poll = setInterval(refresh, 5000);
   refresh();
+}
+
+function enterKycReview(name) {
+  $("onboard").style.display = "none";
+  $("provisioning").style.display = "none";
+  $("dashboard").style.display = "none";
+  $("kyc-review").style.display = "grid";
+  $("btn-kyc-dashboard").onclick = () => enterDashboard(name);
+  renderKycState(user);
+}
+
+async function refreshKycStatus({ continueWhenApproved = false } = {}) {
+  clearErr("kyc-err");
+  try {
+    const k = await api(`/api/users/${user.id}/kyc`);
+    user = { ...user, ...k, funding: k.funding ?? user.funding };
+    renderKycState(user);
+    if (kycApproved(user) && continueWhenApproved) {
+      const full = await api(`/api/users/${user.id}`);
+      renderUser(full);
+      if (user.iban || user.funding?.status === "active" || user.funding?.mode === "mock") {
+        return enterDashboard(user.name || pendingInfo?.name || "Account");
+      }
+      return enterProvisioning(user.name || pendingInfo?.name || "Account");
+    }
+  } catch (e) { showErr("kyc-err", e); }
 }
 
 function enterProvisioning(name) {
@@ -650,6 +741,7 @@ function enterProvisioning(name) {
   const tick = async () => {
     let u = user;
     try { u = await api(`/api/users/${user.id}`); user = u; } catch {}
+    if (!kycApproved(u)) return enterKycReview(name);
     const f = u.funding || {};
     const detail = (f.detail || "").toLowerCase();
 
@@ -774,6 +866,7 @@ async function createAccount(withPasskey) {
         await new Promise((r) => setTimeout(r, 1600));
       }
     }
+    if (!kycApproved(user)) return enterKycReview(pendingInfo.name);
     // After the passkey, so the spending key can be locked behind it.
     try {
       await registerDeviceKey(u);
@@ -793,6 +886,11 @@ $("btn-passkey").onclick = () => {
   createAccount(true);
 };
 $("btn-skippk").onclick = () => createAccount(false);
+$("btn-kyc-refresh").onclick = () => refreshKycStatus({ continueWhenApproved: true });
+$("btn-dash-kyc-refresh").onclick = async () => {
+  await refresh();
+  if (kycApproved(user)) enterDashboard(user.name);
+};
 
 /* returning users: discoverable-credential sign-in */
 $("link-signin").onclick = async (ev) => {
@@ -814,17 +912,19 @@ $("link-signin").onclick = async (ev) => {
       clientDataJSON: b64url(cred.response.clientDataJSON),
       signature: b64url(cred.response.signature),
     });
-    user = u;
-    renderUser(u);
-    enterDashboard(u.name);
-  } catch (e) { showErr("create-err", e); }
-};
+	    user = u;
+	    renderUser(u);
+	    if (kycApproved(u)) enterDashboard(u.name);
+	    else enterKycReview(u.name);
+	  } catch (e) { showErr("create-err", e); }
+	};
 
-$("btn-deposit").onclick = async () => {
-  clearErr("dep-err");
-  try {
-    await api("/api/simulate/sepa-deposit", { iban: user.iban, amountEur: Number($("dep-amount").value) });
-    await refresh();
+	$("btn-deposit").onclick = async () => {
+	  clearErr("dep-err");
+	  try {
+	    if (!kycApproved(user)) throw new Error("identity review must be approved before adding money");
+	    await api("/api/simulate/sepa-deposit", { iban: user.iban, amountEur: Number($("dep-amount").value) });
+	    await refresh();
   } catch (e) { showErr("dep-err", e); }
 };
 
@@ -868,6 +968,7 @@ document.querySelectorAll(".dest-btn").forEach((b) => {
 
 async function selectDest(d) {
   clearErr("dest-err");
+  if (!kycApproved(user)) return showErr("dest-err", new Error("identity review must be approved before sending"));
   const amt = Number($("send-amount").value);
   if (!(amt > 0)) return showErr("dest-err", new Error("enter an amount first"));
   dest = d;
@@ -1113,11 +1214,12 @@ async function pollSepaTransfer(id) {
   setTimeout(() => pollSepaTransfer(id), 5000);
 }
 
-$("btn-send").onclick = async () => {
-  clearErr("send-err");
-  $("btn-send").disabled = true;
-  try {
-    // Late binding for accounts that skipped registration at onboarding.
+	$("btn-send").onclick = async () => {
+	  clearErr("send-err");
+	  $("btn-send").disabled = true;
+	  try {
+	    if (!kycApproved(user)) throw new Error("identity review must be approved before sending");
+	    // Late binding for accounts that skipped registration at onboarding.
     if (!user.authorizerAddress) await registerDeviceKey(user);
 
     // 1. Propose: the server fixes the terms and returns them unexecuted.

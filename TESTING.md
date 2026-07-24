@@ -43,6 +43,11 @@ npm run dev              # then open http://localhost:3000
    Expect: merchant + ₹450 parsed automatically, INR-fixed quote ("You pay
    €5.09"), timeline incl. a 12-digit UTR receipt, PAID.
 
+KYC-gated mode: start the API with `KYC_AUTO_APPROVE=0`. A new account should
+land on the Identity review screen instead of the provisioning spinner. The
+dashboard can still be opened, but add-money and send controls stay unavailable
+until the account becomes `approved`.
+
 ## Level 2 — real sandboxes (optional, ~20 min setup)
 
 ### Monerium (real IBANs on real smart wallets)
