@@ -49,8 +49,10 @@ Running this repo with sandbox credentials, today:
   users sign in with it.
 - **KYC gate**: local demos auto-approve by default, but `KYC_AUTO_APPROVE=0`
   starts users as `pending`; IBAN issuance, deposits, device binding, quotes,
-  and transfers fail closed until a review approves the account. The included
-  mock review endpoint is for local tests only, not a regulated provider.
+  and transfers fail closed until a review approves the account. The app shows
+  pending/rejected/manual-review states instead of provisioning forever. The
+  included mock review endpoint is for local tests only, not a regulated
+  provider.
 
 ## What's simulated
 
@@ -135,6 +137,8 @@ meant to be read in one sitting.
 - Quotes lock a rate for ten minutes; nothing hedges the exposure.
 - Production must set `KYC_AUTO_APPROVE=0` and replace the local mock-review
   seam with a real KYC provider before issuing IBANs or allowing payments.
+  Pending or rejected accounts are visible in the UI, but the approval decision
+  must still come from a provider/operator path, not the user's own session.
 - Monerium webhooks verify the documented `webhook-signature` HMAC when
   `MONERIUM_WEBHOOK_SECRET=whsec_...` is set; leave it unset only for local
   sandbox polling or stubbed tests.
